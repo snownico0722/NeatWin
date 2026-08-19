@@ -36,7 +36,7 @@ public sealed class WindowManager
                 return true;
             }
 
-            _ = NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
+            NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
             if (processId == ownProcessId)
             {
                 return true;
