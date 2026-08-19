@@ -35,9 +35,17 @@ internal sealed class SettingsStore
     {
         var stored = LoadStoredSettings();
         var defaults = new TidyOptions();
+        var mode = stored.AlgorithmMode is int rawMode && Enum.IsDefined(typeof(TidyAlgorithmMode), rawMode)
+            ? (TidyAlgorithmMode)rawMode
+            : defaults.AlgorithmMode;
 
         return defaults with
         {
+            AlgorithmMode = mode,
+            PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
+            OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
+            SpaceUsageWeight = Math.Clamp(stored.SpaceUsageWeight ?? defaults.SpaceUsageWeight, 0.0, 5.0),
+            SmartIterations = Math.Clamp(stored.SmartIterations ?? defaults.SmartIterations, 4, 128),
             NeighborSnapDistance = Math.Clamp(stored.NeighborSnapDistance ?? defaults.NeighborSnapDistance, 0, 240),
             AlignmentSnapDistance = Math.Clamp(stored.AlignmentSnapDistance ?? defaults.AlignmentSnapDistance, 0, 120),
             ScreenSnapDistance = Math.Clamp(stored.ScreenSnapDistance ?? defaults.ScreenSnapDistance, 0, 240),
@@ -62,6 +70,11 @@ internal sealed class SettingsStore
     internal void SaveTidyOptions(TidyOptions options)
     {
         var settings = LoadStoredSettings();
+        settings.AlgorithmMode = (int)options.AlgorithmMode;
+        settings.PreserveLayoutWeight = options.PreserveLayoutWeight;
+        settings.OrderlinessWeight = options.OrderlinessWeight;
+        settings.SpaceUsageWeight = options.SpaceUsageWeight;
+        settings.SmartIterations = options.SmartIterations;
         settings.NeighborSnapDistance = options.NeighborSnapDistance;
         settings.AlignmentSnapDistance = options.AlignmentSnapDistance;
         settings.ScreenSnapDistance = options.ScreenSnapDistance;
@@ -110,6 +123,11 @@ internal sealed class SettingsStore
         public bool Shift { get; set; }
         public bool Win { get; set; }
 
+        public int? AlgorithmMode { get; set; }
+        public double? PreserveLayoutWeight { get; set; }
+        public double? OrderlinessWeight { get; set; }
+        public double? SpaceUsageWeight { get; set; }
+        public int? SmartIterations { get; set; }
         public int? NeighborSnapDistance { get; set; }
         public int? AlignmentSnapDistance { get; set; }
         public int? ScreenSnapDistance { get; set; }
