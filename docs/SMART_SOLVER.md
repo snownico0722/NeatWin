@@ -22,10 +22,7 @@ Smart creates a sparse constraint graph rather than comparing every possible lay
 
 ### Horizontal adjacency
 
-Two windows become horizontal-neighbor candidates when:
-
-- their vertical overlap ratio is high enough; and
-- the distance between the right edge of the left window and the left edge of the right window is inside the neighbor inference radius.
+Two windows become horizontal-neighbor candidates when their vertical overlap ratio is high enough and the distance between the right edge of the left window and the left edge of the right window is inside the neighbor inference radius.
 
 The desired relation is:
 
@@ -65,7 +62,7 @@ right_i - left_i = original_width_i
 bottom_i - top_i = original_height_i
 ```
 
-This separates two ideas that a simple maximum-resize percentage cannot express: the **preference** to solve a relationship by translating a window instead of resizing it, and the **hard upper bound** on how much resizing is allowed at all.
+This separates the **preference** to solve a relationship by translating a window instead of resizing it from the **hard upper bound** on how much resizing is allowed at all.
 
 ### Confidence
 
@@ -95,16 +92,9 @@ where `size_error_i` represents the deviation from the original width and height
 
 The current implementation does not depend on a heavyweight general-purpose QP package. Because the inferred graph is sparse and the intended correction is local, it approximates the weighted least-squares solution with damped Jacobi relaxation.
 
-Each edge receives proposals from:
+Each edge receives proposals from its original baseline position, the opposite edge of the same window when size preservation is enabled, related edges of neighboring windows and an optional screen anchor. The weighted mean becomes the edge's next unconstrained target. A damping factor prevents oscillation when multiple relationships compete.
 
-- its original baseline position;
-- the opposite edge of the same window when size preservation is enabled;
-- related edges of neighboring windows; and
-- an optional screen anchor.
-
-The weighted mean becomes the edge's next unconstrained target. A damping factor prevents oscillation when multiple relationships compete.
-
-## 4. Projection / hard constraints
+## 4. Projection and high-level behavior passes
 
 After every relaxation iteration, the unconstrained rectangle is projected back into usability constraints:
 
@@ -116,21 +106,43 @@ After every relaxation iteration, the unconstrained rectangle is projected back 
 
 Off-screen recovery is intentionally different from cosmetic optimization. It is a hard correctness constraint and may exceed the ordinary movement budget.
 
+After the weighted solver finishes, Smart has a small post-solve behavior projection. These are intentionally high-level policies rather than raw coefficients.
+
+### Reversible vertical fill
+
+When enabled, a window that is already a strong geometric candidate for full work-area height can be normalized to the exact work-area top and bottom. Eligibility depends on the Smart strength, hit and size profiles so this does not blindly make every window full-height.
+
+NeatWin records the pre-tidy rectangle for windows changed by this policy. Windows exposes native snapped windows as an `Arranged` state with a separate restore rectangle, but the API that applies an arranged state cannot be used by NeatWin to arrange arbitrary foreign-process windows. NeatWin therefore reproduces the user-facing unsnap behavior: it listens for `EVENT_SYSTEM_MOVESIZESTART` and, when the next interaction is a title-bar drag rather than border resize, restores the saved rectangle under the pointer.
+
+### Overlap separation
+
+Overlap avoidance is implemented as a deterministic separation projection after the main optimization. For each participating overlap it:
+
+1. measures overlap area relative to the smaller window;
+2. selects the horizontal or vertical separation axis with the lower normalized penetration;
+3. splits the required movement according to window mobility/importance, so the foreground window tends to move less;
+4. projects the result through movement and work-area constraints;
+5. repeats for a small bounded number of passes.
+
+The user-facing **Gentle / Balanced / Strong** levels control how deep an overlap is considered accidental and how much movement budget the separation pass may use. Strong is allowed to resolve much deeper overlaps than Gentle, but the algorithm still avoids retile-style global rearrangement.
+
 ## 5. Why this is different from Classic
 
 Classic mode performs a sequence of local rules. A later rule can partially undo an earlier rule, and each threshold is essentially independent.
 
-Smart mode solves all inferred relationships together. A three-window arrangement such as one large window above two smaller windows naturally produces a small constraint graph with shared horizontal/vertical boundaries. Competing requests are resolved by weight rather than execution order.
+Smart mode solves inferred relationships together. A three-window arrangement such as one large window above two smaller windows naturally produces a small constraint graph with shared horizontal/vertical boundaries. Competing requests are resolved by weight rather than execution order, followed by bounded high-level projections for behaviors such as overlap separation.
 
 ## 6. User-facing intent profiles
 
-The mathematical parameters above are **implementation details**, not Smart-mode UI controls. Smart exposes only three compact intent axes, each with three levels:
+The mathematical parameters above are **implementation details**, not Smart-mode UI controls. Smart exposes a compact intent model:
 
-- **Tidy strength — Gentle / Balanced / Assertive**: controls how strongly the optimizer may depart from the observed arrangement overall.
-- **Hit tendency — Cautious / Balanced / Sensitive**: controls how readily nearby geometry is admitted into the relationship graph.
-- **Size tendency — Preserve size / Balanced / Expand usage**: controls the trade-off between translating whole windows and resizing them to make better use of nearby free space.
+- **Tidy strength — Gentle / Balanced / Assertive**: how strongly the optimizer may depart from the observed arrangement overall.
+- **Hit tendency — Cautious / Balanced / Sensitive**: how readily nearby geometry is admitted into the relationship graph.
+- **Size tendency — Preserve size / Balanced / Expand usage**: the trade-off between translating whole windows and resizing them to use nearby free space.
+- **Overlap avoidance — Gentle / Balanced / Strong**: how aggressively visible-window overlaps should be separated.
+- **Prefer reversible vertical fill — On / Off**: whether suitable windows should prefer exact top-to-bottom work-area usage with one-drag restore behavior.
 
-The default is Balanced on all three axes. A profile resolver maps these choices to calibrated internal weights, inference ranges, iteration counts and hard cosmetic budgets before `SmartTidySolver` runs.
+The default is Balanced on all three tendency axes and overlap avoidance, with reversible vertical fill enabled. A profile resolver maps the main tendency choices to calibrated internal weights, inference ranges, iteration counts and hard cosmetic budgets before `SmartTidySolver` runs.
 
 This separation is intentional:
 
@@ -139,7 +151,7 @@ This separation is intentional:
 - Legacy/raw numeric values in settings cannot silently alter Smart behavior.
 - Classic remains the explicit expert/threshold mode for users who actually want direct pixel and percentage controls.
 
-Off-screen rescue is kept as a separate behavior switch because it is a correctness policy, not a cosmetic optimization preference.
+Off-screen rescue remains a separate behavior switch because it is a correctness policy rather than a cosmetic optimization preference.
 
 ## 7. Research lineage
 
@@ -152,7 +164,7 @@ NeatWin is not a direct implementation of those papers. Desktop windows add diff
 The current Smart solver deliberately stops before semantic or learned inference. Useful future extensions include:
 
 - shared-boundary clustering so three or more windows can converge onto one inferred line as a group;
-- explicit inequality separation constraints for larger-but-still-unintentional overlaps;
+- integrating overlap inequality constraints directly into the weighted solve once real-desktop calibration justifies the extra coupling;
 - aspect/proportion priors for near-equal splits and repeated rows/columns;
 - per-window minimum-track-size queries (`WM_GETMINMAXINFO`-equivalent behavior where feasible);
 - a preview/debug overlay showing inferred relationships and confidence before applying a plan;
