@@ -132,6 +132,8 @@ dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj -c Release
 
 GitHub Actions builds and tests the project on `windows-latest` and publishes a framework-dependent x64 single-file artifact.
 
+The current Smart V0 regression suite contains **19 core tests** covering visibility filtering, off-screen recovery, exact local gap/overlap convergence, screen-edge anchors, user-adjustable inference and objective weights, resize resistance, a three-window topology case, and Classic fallback.
+
 ## Current limitations
 
 V0 still has deliberate boundaries:
