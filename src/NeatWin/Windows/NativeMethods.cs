@@ -36,6 +36,7 @@ internal static class NativeMethods
     internal const uint ModWin = 0x0008;
     internal const uint ModNoRepeat = 0x4000;
     internal const uint EventSystemMoveSizeStart = 0x000A;
+    internal const uint EventSystemMoveSizeEnd = 0x000B;
     internal const uint WinEventOutOfContext = 0x0000;
     internal const uint WinEventSkipOwnProcess = 0x0002;
     internal static readonly nint HwndMessage = new(-3);
@@ -150,6 +151,14 @@ internal static class NativeMethods
         uint flags,
         uint timeout,
         out nuint result);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PostMessage(
+        nint hwnd,
+        uint message,
+        nint wParam,
+        nint lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
