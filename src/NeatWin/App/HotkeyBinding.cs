@@ -73,7 +73,7 @@ internal readonly record struct HotkeyBinding(
     {
         if (key >= Keys.D0 && key <= Keys.D9)
         {
-            return ((char)('0' + (key - Keys.D0))).ToString();
+            return ((char)('0' + ((int)key - (int)Keys.D0))).ToString();
         }
 
         return key.ToString();
