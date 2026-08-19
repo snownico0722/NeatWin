@@ -1,6 +1,17 @@
 namespace NeatWin.Core;
 
+public enum TidyAlgorithmMode
+{
+    Smart,
+    Classic,
+}
+
 public sealed record TidyOptions(
+    TidyAlgorithmMode AlgorithmMode = TidyAlgorithmMode.Smart,
+    double PreserveLayoutWeight = 1.0,
+    double OrderlinessWeight = 1.8,
+    double SpaceUsageWeight = 1.0,
+    int SmartIterations = 36,
     int NeighborSnapDistance = 72,
     int AlignmentSnapDistance = 24,
     int ScreenSnapDistance = 96,
@@ -19,6 +30,16 @@ public sealed class TidyEngine
         TidyOptions? options = null)
     {
         options ??= new TidyOptions();
+
+        return options.AlgorithmMode == TidyAlgorithmMode.Smart
+            ? SmartTidySolver.CreatePlan(visibleWindows, options)
+            : CreateClassicPlan(visibleWindows, options);
+    }
+
+    private static IReadOnlyList<TidyMove> CreateClassicPlan(
+        IReadOnlyList<VisibleWindow> visibleWindows,
+        TidyOptions options)
+    {
         var result = new List<TidyMove>();
 
         foreach (var monitorGroup in visibleWindows.GroupBy(static item => item.Window.MonitorHandle))
@@ -49,9 +70,6 @@ public sealed class TidyEngine
                 var target = ClampToBudget(item.Snapshot, item.Current, options);
                 if (options.RescueOffscreenWindows)
                 {
-                    // Off-screen recovery is a correctness constraint, not a cosmetic tweak.
-                    // It is deliberately allowed to exceed MaximumEdgeAdjustment so a window
-                    // cannot remain stranded outside the usable monitor work area.
                     target = FitInsideWorkArea(item.Snapshot, target);
                 }
 
@@ -84,9 +102,6 @@ public sealed class TidyEngine
         var width = rect.Width;
         var height = rect.Height;
 
-        // Resizable windows that are larger than the usable screen are shrunk just enough
-        // to fit. Fixed-size windows keep their dimensions and are anchored so their
-        // top-left remains usable, because Windows cannot honor a forced resize for them.
         if (snapshot.IsResizable)
         {
             width = Math.Min(width, workArea.Width);
