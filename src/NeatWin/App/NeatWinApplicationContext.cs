@@ -15,8 +15,11 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly MainWindow _mainWindow;
     private readonly ReversibleVerticalFillManager _verticalFillManager;
+    private readonly AutoTidyManager _autoTidyManager;
     private TidyOptions _tidyOptions;
     private SmartBehaviorOptions _smartBehaviorOptions;
+    private bool _autoTidyEnabled;
+    private bool _tidyRunning;
 
     public NeatWinApplicationContext()
     {
@@ -24,14 +27,23 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _tidyOptions = _settingsStore.LoadTidyOptions();
         _smartBehaviorOptions = _settingsStore.LoadSmartBehaviorOptions();
         _verticalFillManager = new ReversibleVerticalFillManager();
+        _autoTidyManager = new AutoTidyManager();
+        _autoTidyEnabled = _settingsStore.LoadAutoTidyEnabled() && _autoTidyManager.IsAvailable;
+        _autoTidyManager.Enabled = _autoTidyEnabled;
+        _autoTidyManager.TidyRequested += OnAutoTidyRequested;
 
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += RunTidy;
 
-        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions);
+        _mainWindow = new MainWindow(
+            requestedHotkey,
+            _tidyOptions,
+            _smartBehaviorOptions,
+            _autoTidyEnabled);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
         _mainWindow.HotkeyChangeRequested += OnHotkeyChangeRequested;
         _mainWindow.TidyOptionsChangeRequested += OnTidyOptionsChangeRequested;
+        _mainWindow.AutoTidyChangeRequested += OnAutoTidyChangeRequested;
         _mainWindow.ExitRequested += (_, _) => ExitThread();
 
         var menu = new ContextMenuStrip();
@@ -67,7 +79,9 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         if (disposing)
         {
             _hotkeyWindow.HotkeyPressed -= RunTidy;
+            _autoTidyManager.TidyRequested -= OnAutoTidyRequested;
             _hotkeyWindow.Dispose();
+            _autoTidyManager.Dispose();
             _verticalFillManager.Dispose();
             _mainWindow.Dispose();
             _trayIcon.Visible = false;
@@ -135,8 +149,48 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         }
     }
 
-    private void RunTidy()
+    private void OnAutoTidyChangeRequested(object? sender, AutoTidyChangeEventArgs eventArgs)
     {
+        if (eventArgs.Enabled && !_autoTidyManager.IsAvailable)
+        {
+            _autoTidyEnabled = false;
+            _autoTidyManager.Enabled = false;
+            _mainWindow.SetAutoTidyEnabled(false);
+            _mainWindow.SetActivity("自动整理监听不可用。", error: true);
+            return;
+        }
+
+        _autoTidyEnabled = eventArgs.Enabled;
+        _autoTidyManager.Enabled = _autoTidyEnabled;
+
+        try
+        {
+            _settingsStore.SaveAutoTidyEnabled(_autoTidyEnabled);
+        }
+        catch (Exception exception)
+        {
+            _mainWindow.SetActivity($"自动整理已在本次运行中生效，但保存失败：{exception.Message}", error: true);
+        }
+    }
+
+    private void OnAutoTidyRequested()
+    {
+        if (_autoTidyEnabled)
+        {
+            RunTidy(showActivity: false);
+        }
+    }
+
+    private void RunTidy() => RunTidy(showActivity: true);
+
+    private void RunTidy(bool showActivity)
+    {
+        if (_tidyRunning)
+        {
+            return;
+        }
+
+        _tidyRunning = true;
         try
         {
             var snapshot = _windowManager.Capture();
@@ -156,12 +210,22 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 plan,
                 _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
                 _smartBehaviorOptions.PreferReversibleVerticalFill);
-            _windowManager.Apply(plan);
 
-            var message = plan.Count == 0
-                ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，没有需要微调的地方。"
-                : $"整理完成：检查 {visibleWorkingSet.Count} 个当前可见窗口，调整 {plan.Count} 个。";
-            _mainWindow.SetActivity(message);
+            if (plan.Count > 0)
+            {
+                // Some applications may report a move/size-end event after NeatWin changes their
+                // rectangle. Suppress that short tail so automatic tidy cannot feed back into itself.
+                _autoTidyManager.SuppressFor(650);
+                _windowManager.Apply(plan);
+            }
+
+            if (showActivity)
+            {
+                var message = plan.Count == 0
+                    ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，没有需要微调的地方。"
+                    : $"整理完成：检查 {visibleWorkingSet.Count} 个当前可见窗口，调整 {plan.Count} 个。";
+                _mainWindow.SetActivity(message);
+            }
         }
         catch (Exception exception)
         {
@@ -171,6 +235,10 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 "NeatWin",
                 exception.Message,
                 ToolTipIcon.Error);
+        }
+        finally
+        {
+            _tidyRunning = false;
         }
     }
 
