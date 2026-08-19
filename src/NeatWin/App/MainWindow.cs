@@ -2,7 +2,6 @@ namespace NeatWin.App;
 
 internal sealed class MainWindow : Form
 {
-    private readonly Label _runningLabel;
     private readonly Label _activityLabel;
     private readonly Label _hotkeyStatusLabel;
     private readonly CheckBox _ctrlBox;
@@ -46,7 +45,7 @@ internal sealed class MainWindow : Form
             Text = "NeatWin  ·  轻轻整理当前窗口",
             Location = new Point(0, 0),
         };
-        _runningLabel = new Label
+        var runningLabel = new Label
         {
             AutoSize = true,
             Text = "● 正在运行",
@@ -54,7 +53,7 @@ internal sealed class MainWindow : Form
             Location = new Point(0, 29),
         };
         header.Controls.Add(title);
-        header.Controls.Add(_runningLabel);
+        header.Controls.Add(runningLabel);
         root.Controls.Add(header, 0, 0);
 
         var tidyButton = new Button
@@ -112,7 +111,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Margin = new Padding(8, 8, 8, 8),
+            Margin = new Padding(8),
         };
         foreach (var option in BuildKeyOptions(initialBinding.Key))
         {
@@ -261,20 +260,9 @@ internal sealed class MainWindow : Form
     private static IReadOnlyList<HotkeyKeyOption> BuildKeyOptions(Keys initialKey)
     {
         var keys = new List<Keys>();
-        for (var key = Keys.A; key <= Keys.Z; key++)
-        {
-            keys.Add(key);
-        }
-
-        for (var key = Keys.D0; key <= Keys.D9; key++)
-        {
-            keys.Add(key);
-        }
-
-        for (var key = Keys.F1; key <= Keys.F12; key++)
-        {
-            keys.Add(key);
-        }
+        AddRange(keys, Keys.A, Keys.Z);
+        AddRange(keys, Keys.D0, Keys.D9);
+        AddRange(keys, Keys.F1, Keys.F12);
 
         if (!keys.Contains(initialKey))
         {
@@ -284,13 +272,21 @@ internal sealed class MainWindow : Form
         return keys.Select(key => new HotkeyKeyOption(key)).ToArray();
     }
 
+    private static void AddRange(List<Keys> destination, Keys first, Keys last)
+    {
+        for (var value = (int)first; value <= (int)last; value++)
+        {
+            destination.Add((Keys)value);
+        }
+    }
+
     private sealed record HotkeyKeyOption(Keys Key)
     {
         public override string ToString()
         {
             if (Key >= Keys.D0 && Key <= Keys.D9)
             {
-                return ((char)('0' + (Key - Keys.D0))).ToString();
+                return ((char)('0' + ((int)Key - (int)Keys.D0))).ToString();
             }
 
             return Key.ToString();
