@@ -6,8 +6,32 @@ public enum TidyAlgorithmMode
     Classic,
 }
 
+public enum SmartTidyStrength
+{
+    Gentle,
+    Balanced,
+    Assertive,
+}
+
+public enum SmartHitTendency
+{
+    Cautious,
+    Balanced,
+    Sensitive,
+}
+
+public enum SmartSizeTendency
+{
+    Preserve,
+    Balanced,
+    Expand,
+}
+
 public sealed record TidyOptions(
     TidyAlgorithmMode AlgorithmMode = TidyAlgorithmMode.Smart,
+    SmartTidyStrength SmartStrength = SmartTidyStrength.Balanced,
+    SmartHitTendency SmartHitTendency = SmartHitTendency.Balanced,
+    SmartSizeTendency SmartSizeTendency = SmartSizeTendency.Balanced,
     double PreserveLayoutWeight = 1.0,
     double ResizeResistanceWeight = 0.1,
     double OrderlinessWeight = 1.8,
@@ -33,8 +57,84 @@ public sealed class TidyEngine
         options ??= new TidyOptions();
 
         return options.AlgorithmMode == TidyAlgorithmMode.Smart
-            ? SmartTidySolver.CreatePlan(visibleWindows, options)
+            ? SmartTidySolver.CreatePlan(visibleWindows, ResolveSmartProfile(options))
             : CreateClassicPlan(visibleWindows, options);
+    }
+
+    private static TidyOptions ResolveSmartProfile(TidyOptions options)
+    {
+        var resolved = options;
+
+        resolved = options.SmartStrength switch
+        {
+            SmartTidyStrength.Gentle => resolved with
+            {
+                PreserveLayoutWeight = 1.50,
+                OrderlinessWeight = 1.30,
+                SmartIterations = 28,
+                MaximumEdgeAdjustment = 64,
+            },
+            SmartTidyStrength.Assertive => resolved with
+            {
+                PreserveLayoutWeight = 0.70,
+                OrderlinessWeight = 2.50,
+                SmartIterations = 52,
+                MaximumEdgeAdjustment = 144,
+            },
+            _ => resolved with
+            {
+                PreserveLayoutWeight = 1.00,
+                OrderlinessWeight = 1.80,
+                SmartIterations = 36,
+                MaximumEdgeAdjustment = 96,
+            },
+        };
+
+        resolved = options.SmartHitTendency switch
+        {
+            SmartHitTendency.Cautious => resolved with
+            {
+                NeighborSnapDistance = 48,
+                AlignmentSnapDistance = 16,
+                ScreenSnapDistance = 64,
+            },
+            SmartHitTendency.Sensitive => resolved with
+            {
+                NeighborSnapDistance = 112,
+                AlignmentSnapDistance = 36,
+                ScreenSnapDistance = 144,
+            },
+            _ => resolved with
+            {
+                NeighborSnapDistance = 72,
+                AlignmentSnapDistance = 24,
+                ScreenSnapDistance = 96,
+            },
+        };
+
+        resolved = options.SmartSizeTendency switch
+        {
+            SmartSizeTendency.Preserve => resolved with
+            {
+                ResizeResistanceWeight = 3.00,
+                SpaceUsageWeight = 0.70,
+                MaximumSizeChangeRatio = 0.06,
+            },
+            SmartSizeTendency.Expand => resolved with
+            {
+                ResizeResistanceWeight = 0.02,
+                SpaceUsageWeight = 1.60,
+                MaximumSizeChangeRatio = 0.20,
+            },
+            _ => resolved with
+            {
+                ResizeResistanceWeight = 0.10,
+                SpaceUsageWeight = 1.00,
+                MaximumSizeChangeRatio = 0.12,
+            },
+        };
+
+        return resolved;
     }
 
     private static IReadOnlyList<TidyMove> CreateClassicPlan(
