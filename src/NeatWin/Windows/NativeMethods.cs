@@ -26,9 +26,20 @@ internal static class NativeMethods
     internal const uint ModShift = 0x0004;
     internal const uint ModWin = 0x0008;
     internal const uint ModNoRepeat = 0x4000;
+    internal const uint EventSystemMoveSizeStart = 0x000A;
+    internal const uint WinEventOutOfContext = 0x0000;
+    internal const uint WinEventSkipOwnProcess = 0x0002;
     internal static readonly nint HwndMessage = new(-3);
 
     internal delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+    internal delegate void WinEventProc(
+        nint hook,
+        uint eventType,
+        nint hwnd,
+        int idObject,
+        int idChild,
+        uint eventThread,
+        uint eventTime);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -57,6 +68,13 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetWindowRect(nint hwnd, out Rect rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetCursorPos(out Point point);
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetDpiForWindow(nint hwnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern int GetClassName(nint hwnd, StringBuilder className, int maxCount);
@@ -117,6 +135,20 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool UnregisterHotKey(nint hwnd, int id);
+
+    [DllImport("user32.dll")]
+    internal static extern nint SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        nint module,
+        WinEventProc callback,
+        uint processId,
+        uint threadId,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnhookWinEvent(nint hook);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
     private static extern int GetWindowLong32(nint hwnd, int index);
