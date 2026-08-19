@@ -16,6 +16,7 @@ internal static class SmartTidySolver
     private const double NeighborConstraintScale = 40.0;
     private const double AlignmentConstraintScale = 14.0;
     private const double ScreenConstraintScale = 120.0;
+    private const double SizePreservationConstraintScale = 8.0;
 
     internal static IReadOnlyList<TidyMove> CreatePlan(
         IReadOnlyList<VisibleWindow> visibleWindows,
@@ -67,6 +68,7 @@ internal static class SmartTidySolver
         var result = new List<EdgeConstraint>();
         var orderliness = Math.Max(0, options.OrderlinessWeight);
         var spaceUsage = Math.Max(0, options.SpaceUsageWeight);
+        var resizeResistance = Math.Max(0, options.ResizeResistanceWeight);
 
         for (var i = 0; i < windows.Count; i++)
         {
@@ -79,6 +81,25 @@ internal static class SmartTidySolver
                 options.ScreenSnapDistance, ScreenConstraintScale * spaceUsage);
             AddScreenAnchor(result, i, Edge.Bottom, window.Baseline.Bottom, window.Snapshot.WorkArea.Bottom,
                 options.ScreenSnapDistance, ScreenConstraintScale * spaceUsage);
+
+            if (window.Snapshot.IsResizable && resizeResistance > 0)
+            {
+                var sizeWeight = SizePreservationConstraintScale * resizeResistance * window.Importance;
+                result.Add(EdgeConstraint.Pair(
+                    i,
+                    Edge.Right,
+                    i,
+                    Edge.Left,
+                    window.Baseline.Width,
+                    sizeWeight));
+                result.Add(EdgeConstraint.Pair(
+                    i,
+                    Edge.Bottom,
+                    i,
+                    Edge.Top,
+                    window.Baseline.Height,
+                    sizeWeight));
+            }
         }
 
         for (var i = 0; i < windows.Count; i++)
@@ -110,6 +131,7 @@ internal static class SmartTidySolver
                             Edge.Right,
                             rightIndex,
                             Edge.Left,
+                            0,
                             NeighborConstraintScale * orderliness * confidence));
                     }
 
@@ -139,6 +161,7 @@ internal static class SmartTidySolver
                             Edge.Bottom,
                             bottomIndex,
                             Edge.Top,
+                            0,
                             NeighborConstraintScale * orderliness * confidence));
                     }
 
@@ -195,6 +218,7 @@ internal static class SmartTidySolver
             firstEdge,
             secondWindow,
             secondEdge,
+            0,
             baseWeight * confidence));
     }
 
@@ -223,8 +247,14 @@ internal static class SmartTidySolver
                 var firstCurrent = windows[constraint.WindowIndex].Current.Get(constraint.Edge);
                 var otherCurrent = windows[otherIndex].Current.Get(constraint.OtherEdge);
 
-                accumulators[constraint.WindowIndex].Add(constraint.Edge, otherCurrent, constraint.Weight);
-                accumulators[otherIndex].Add(constraint.OtherEdge, firstCurrent, constraint.Weight);
+                accumulators[constraint.WindowIndex].Add(
+                    constraint.Edge,
+                    otherCurrent + constraint.Delta,
+                    constraint.Weight);
+                accumulators[otherIndex].Add(
+                    constraint.OtherEdge,
+                    firstCurrent - constraint.Delta,
+                    constraint.Weight);
             }
             else
             {
@@ -388,6 +418,7 @@ internal static class SmartTidySolver
         Edge Edge,
         int? OtherWindowIndex,
         Edge OtherEdge,
+        double Delta,
         double AnchorValue,
         double Weight)
     {
@@ -396,15 +427,16 @@ internal static class SmartTidySolver
             Edge firstEdge,
             int secondWindow,
             Edge secondEdge,
+            double delta,
             double weight) =>
-            new(firstWindow, firstEdge, secondWindow, secondEdge, 0, weight);
+            new(firstWindow, firstEdge, secondWindow, secondEdge, delta, 0, weight);
 
         internal static EdgeConstraint Anchor(
             int window,
             Edge edge,
             double anchor,
             double weight) =>
-            new(window, edge, null, edge, anchor, weight);
+            new(window, edge, null, edge, 0, anchor, weight);
     }
 
     private struct EdgeAccumulator
