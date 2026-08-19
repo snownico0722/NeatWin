@@ -61,9 +61,14 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void TidyOptions_DefaultToSmartMode()
+    public void TidyOptions_DefaultToSmartBalancedProfiles()
     {
-        Assert.Equal(TidyAlgorithmMode.Smart, new TidyOptions().AlgorithmMode);
+        var options = new TidyOptions();
+
+        Assert.Equal(TidyAlgorithmMode.Smart, options.AlgorithmMode);
+        Assert.Equal(SmartTidyStrength.Balanced, options.SmartStrength);
+        Assert.Equal(SmartHitTendency.Balanced, options.SmartHitTendency);
+        Assert.Equal(SmartSizeTendency.Balanced, options.SmartSizeTendency);
     }
 
     [Fact]
@@ -120,10 +125,10 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void TidyEngine_RescuesWindowFarOutsideWorkAreaBeyondNormalBudget()
+    public void TidyEngine_RescuesWindowFarOutsideWorkAreaBeyondSmartGentleBudget()
     {
         var window = Window(1, new RectI(-420, 180, 700, 500), 0);
-        var options = new TidyOptions(MaximumEdgeAdjustment: 32);
+        var options = new TidyOptions(SmartStrength: SmartTidyStrength.Gentle);
 
         var plan = new TidyEngine().CreatePlan([Visible(window)], options);
         var target = TargetFor(plan, window);
@@ -162,13 +167,7 @@ public sealed class CoreBehaviorTests
     public void TidyEngine_CanDisableOffscreenRescue()
     {
         var window = Window(1, new RectI(-400, 200, 600, 500), 0);
-        var options = new TidyOptions(
-            NeighborSnapDistance: 0,
-            AlignmentSnapDistance: 0,
-            ScreenSnapDistance: 0,
-            MaximumEdgeAdjustment: 0,
-            RescueOffscreenWindows: false,
-            Passes: 1);
+        var options = new TidyOptions(RescueOffscreenWindows: false);
 
         var plan = new TidyEngine().CreatePlan([Visible(window)], options);
 
@@ -176,12 +175,12 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void TidyEngine_RespectsCustomNeighborSnapDistance()
+    public void ClassicMode_RespectsCustomNeighborSnapDistance()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
         var right = Window(2, new RectI(740, 200, 500, 500), 1);
         var conservative = new TidyOptions(
-            ResizeResistanceWeight: 0,
+            AlgorithmMode: TidyAlgorithmMode.Classic,
             NeighborSnapDistance: 20,
             AlignmentSnapDistance: 0,
             ScreenSnapDistance: 0,
@@ -195,71 +194,80 @@ public sealed class CoreBehaviorTests
 
         Assert.Empty(conservativePlan);
         Assert.NotEmpty(generousPlan);
+        Assert.Equal(TargetFor(generousPlan, left).Right, TargetFor(generousPlan, right).Left);
+    }
+
+    [Fact]
+    public void SmartMode_HitTendencyControlsWhichRelationsAreInferred()
+    {
+        var left = Window(1, new RectI(200, 200, 500, 500), 0);
+        var right = Window(2, new RectI(780, 200, 500, 500), 1);
+        var cautious = new TidyOptions(
+            SmartHitTendency: SmartHitTendency.Cautious,
+            RescueOffscreenWindows: false);
+        var sensitive = cautious with { SmartHitTendency = SmartHitTendency.Sensitive };
+
+        var cautiousPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], cautious);
+        var sensitivePlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], sensitive);
+
+        Assert.Empty(cautiousPlan);
+        Assert.NotEmpty(sensitivePlan);
         Assert.InRange(
-            Math.Abs(TargetFor(generousPlan, left).Right - TargetFor(generousPlan, right).Left),
+            Math.Abs(TargetFor(sensitivePlan, left).Right - TargetFor(sensitivePlan, right).Left),
             0,
             1);
     }
 
     [Fact]
-    public void SmartMode_OrderlinessWeightControlsHowStronglyRelationsConverge()
+    public void SmartMode_IgnoresClassicRawThresholds()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
-        var right = Window(2, new RectI(748, 200, 500, 500), 1);
-        var baseOptions = new TidyOptions(
+        var right = Window(2, new RectI(780, 200, 500, 500), 1);
+        var options = new TidyOptions(
             AlgorithmMode: TidyAlgorithmMode.Smart,
-            PreserveLayoutWeight: 2.0,
-            OrderlinessWeight: 0.15,
-            SpaceUsageWeight: 0,
-            SmartIterations: 48,
-            NeighborSnapDistance: 60,
-            AlignmentSnapDistance: 0,
-            ScreenSnapDistance: 0,
-            MaximumEdgeAdjustment: 100,
+            SmartHitTendency: SmartHitTendency.Cautious,
+            NeighborSnapDistance: 240,
+            AlignmentSnapDistance: 120,
+            ScreenSnapDistance: 240,
             RescueOffscreenWindows: false);
 
-        var weakPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], baseOptions);
-        var strongPlan = new TidyEngine().CreatePlan(
-            [Visible(left), Visible(right)],
-            baseOptions with { OrderlinessWeight = 4.0 });
+        var plan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], options);
 
-        var weakGap = Math.Abs(TargetFor(weakPlan, right).Left - TargetFor(weakPlan, left).Right);
-        var strongGap = Math.Abs(TargetFor(strongPlan, right).Left - TargetFor(strongPlan, left).Right);
-
-        Assert.True(strongGap < weakGap);
+        Assert.Empty(plan);
     }
 
     [Fact]
-    public void SmartMode_ResizeResistancePrefersTranslationOverChangingWidth()
+    public void SmartMode_StrengthControlsHowFarAWindowIsWillingToMove()
+    {
+        var window = Window(1, new RectI(80, 220, 600, 500), 0);
+        var gentle = new TidyOptions(
+            SmartStrength: SmartTidyStrength.Gentle,
+            RescueOffscreenWindows: false);
+        var assertive = gentle with { SmartStrength = SmartTidyStrength.Assertive };
+
+        var gentleTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], gentle), window);
+        var assertiveTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], assertive), window);
+
+        Assert.True(assertiveTarget.Left < gentleTarget.Left);
+    }
+
+    [Fact]
+    public void SmartMode_SizeTendencyControlsTranslationVersusResize()
     {
         var window = Window(1, new RectI(40, 220, 600, 500), 0);
-        var flexibleOptions = new TidyOptions(
-            AlgorithmMode: TidyAlgorithmMode.Smart,
-            PreserveLayoutWeight: 0.5,
-            ResizeResistanceWeight: 0,
-            OrderlinessWeight: 1,
-            SpaceUsageWeight: 3,
-            SmartIterations: 64,
-            NeighborSnapDistance: 0,
-            AlignmentSnapDistance: 0,
-            ScreenSnapDistance: 80,
-            MaximumEdgeAdjustment: 100,
-            MaximumSizeChangeRatio: 0.20,
+        var preserve = new TidyOptions(
+            SmartSizeTendency: SmartSizeTendency.Preserve,
             RescueOffscreenWindows: false);
-        var resistantOptions = flexibleOptions with { ResizeResistanceWeight = 5.0 };
+        var expand = preserve with { SmartSizeTendency = SmartSizeTendency.Expand };
 
-        var flexibleTarget = TargetFor(
-            new TidyEngine().CreatePlan([Visible(window)], flexibleOptions),
-            window);
-        var resistantTarget = TargetFor(
-            new TidyEngine().CreatePlan([Visible(window)], resistantOptions),
-            window);
+        var preserveTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], preserve), window);
+        var expandTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], expand), window);
 
-        var flexibleWidthError = Math.Abs(flexibleTarget.Width - window.VisualRect.Width);
-        var resistantWidthError = Math.Abs(resistantTarget.Width - window.VisualRect.Width);
+        var preserveWidthError = Math.Abs(preserveTarget.Width - window.VisualRect.Width);
+        var expandWidthError = Math.Abs(expandTarget.Width - window.VisualRect.Width);
 
-        Assert.True(resistantWidthError < flexibleWidthError);
-        Assert.True(resistantTarget.Left < window.VisualRect.Left);
+        Assert.True(preserveWidthError < expandWidthError);
+        Assert.True(preserveTarget.Left < window.VisualRect.Left);
     }
 
     [Fact]
@@ -269,17 +277,9 @@ public sealed class CoreBehaviorTests
         var bottomLeft = Window(2, new RectI(24, 535, 900, 526), 1);
         var bottomRight = Window(3, new RectI(945, 531, 950, 532), 2);
         var options = new TidyOptions(
-            AlgorithmMode: TidyAlgorithmMode.Smart,
-            PreserveLayoutWeight: 0.8,
-            ResizeResistanceWeight: 0.8,
-            OrderlinessWeight: 3.0,
-            SpaceUsageWeight: 2.0,
-            SmartIterations: 72,
-            NeighborSnapDistance: 64,
-            AlignmentSnapDistance: 30,
-            ScreenSnapDistance: 80,
-            MaximumEdgeAdjustment: 120,
-            MaximumSizeChangeRatio: 0.20,
+            SmartStrength: SmartTidyStrength.Assertive,
+            SmartHitTendency: SmartHitTendency.Sensitive,
+            SmartSizeTendency: SmartSizeTendency.Expand,
             RescueOffscreenWindows: true);
 
         var plan = new TidyEngine().CreatePlan(
