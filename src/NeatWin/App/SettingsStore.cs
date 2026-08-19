@@ -31,6 +31,8 @@ internal sealed class SettingsStore
             settings.Win);
     }
 
+    internal bool LoadAutoTidyEnabled() => LoadStoredSettings().AutoTidyEnabled ?? false;
+
     internal TidyOptions LoadTidyOptions()
     {
         var stored = LoadStoredSettings();
@@ -79,6 +81,13 @@ internal sealed class SettingsStore
         settings.Alt = binding.Alt;
         settings.Shift = binding.Shift;
         settings.Win = binding.Win;
+        WriteStoredSettings(settings);
+    }
+
+    internal void SaveAutoTidyEnabled(bool enabled)
+    {
+        var settings = LoadStoredSettings();
+        settings.AutoTidyEnabled = enabled;
         WriteStoredSettings(settings);
     }
 
@@ -158,6 +167,7 @@ internal sealed class SettingsStore
         public bool Alt { get; set; }
         public bool Shift { get; set; }
         public bool Win { get; set; }
+        public bool? AutoTidyEnabled { get; set; }
 
         public int? AlgorithmMode { get; set; }
         public int? SmartStrength { get; set; }
@@ -189,6 +199,7 @@ internal sealed class SettingsStore
                 Alt = hotkey.Alt,
                 Shift = hotkey.Shift,
                 Win = hotkey.Win,
+                AutoTidyEnabled = false,
             };
         }
     }
