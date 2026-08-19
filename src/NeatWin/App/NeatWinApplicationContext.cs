@@ -14,17 +14,20 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly MainWindow _mainWindow;
+    private TidyOptions _tidyOptions;
 
     public NeatWinApplicationContext()
     {
         var requestedHotkey = _settingsStore.LoadHotkey();
+        _tidyOptions = _settingsStore.LoadTidyOptions();
 
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += RunTidy;
 
-        _mainWindow = new MainWindow(requestedHotkey);
+        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
         _mainWindow.HotkeyChangeRequested += OnHotkeyChangeRequested;
+        _mainWindow.TidyOptionsChangeRequested += OnTidyOptionsChangeRequested;
         _mainWindow.ExitRequested += (_, _) => ExitThread();
 
         var menu = new ContextMenuStrip();
@@ -102,13 +105,32 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _mainWindow.SetHotkeyRegistration(active, success: false, message);
     }
 
+    private void OnTidyOptionsChangeRequested(object? sender, TidyOptionsChangeEventArgs eventArgs)
+    {
+        _tidyOptions = eventArgs.Options;
+
+        try
+        {
+            _settingsStore.SaveTidyOptions(_tidyOptions);
+            _mainWindow.SetTidyOptionsStatus(_tidyOptions, success: true, "算法参数已保存并立即生效。");
+            _mainWindow.SetActivity("算法参数已更新；下一次整理会使用新参数。");
+        }
+        catch (Exception exception)
+        {
+            _mainWindow.SetTidyOptionsStatus(
+                _tidyOptions,
+                success: false,
+                $"参数已在本次运行中生效，但保存失败：{exception.Message}");
+        }
+    }
+
     private void RunTidy()
     {
         try
         {
             var snapshot = _windowManager.Capture();
             var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
-            var plan = _tidyEngine.CreatePlan(visibleWorkingSet);
+            var plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
             _windowManager.Apply(plan);
 
             var message = plan.Count == 0
