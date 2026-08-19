@@ -14,17 +14,21 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly MainWindow _mainWindow;
+    private readonly ReversibleVerticalFillManager _verticalFillManager;
     private TidyOptions _tidyOptions;
+    private SmartBehaviorOptions _smartBehaviorOptions;
 
     public NeatWinApplicationContext()
     {
         var requestedHotkey = _settingsStore.LoadHotkey();
         _tidyOptions = _settingsStore.LoadTidyOptions();
+        _smartBehaviorOptions = _settingsStore.LoadSmartBehaviorOptions();
+        _verticalFillManager = new ReversibleVerticalFillManager();
 
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += RunTidy;
 
-        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions);
+        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
         _mainWindow.HotkeyChangeRequested += OnHotkeyChangeRequested;
         _mainWindow.TidyOptionsChangeRequested += OnTidyOptionsChangeRequested;
@@ -65,6 +69,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         {
             _hotkeyWindow.HotkeyPressed -= RunTidy;
             _hotkeyWindow.Dispose();
+            _verticalFillManager.Dispose();
             _mainWindow.Dispose();
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
@@ -108,19 +113,26 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private void OnTidyOptionsChangeRequested(object? sender, TidyOptionsChangeEventArgs eventArgs)
     {
         _tidyOptions = eventArgs.Options;
+        _smartBehaviorOptions = eventArgs.BehaviorOptions;
 
         try
         {
             _settingsStore.SaveTidyOptions(_tidyOptions);
-            _mainWindow.SetTidyOptionsStatus(_tidyOptions, success: true, "算法参数已保存并立即生效。");
-            _mainWindow.SetActivity("算法参数已更新；下一次整理会使用新参数。");
+            _settingsStore.SaveSmartBehaviorOptions(_smartBehaviorOptions);
+            _mainWindow.SetTidyOptionsStatus(
+                _tidyOptions,
+                _smartBehaviorOptions,
+                success: true,
+                "整理设置已保存并立即生效。");
+            _mainWindow.SetActivity("整理设置已更新；下一次整理会使用新偏好。");
         }
         catch (Exception exception)
         {
             _mainWindow.SetTidyOptionsStatus(
                 _tidyOptions,
+                _smartBehaviorOptions,
                 success: false,
-                $"参数已在本次运行中生效，但保存失败：{exception.Message}");
+                $"设置已在本次运行中生效，但保存失败：{exception.Message}");
         }
     }
 
@@ -130,7 +142,21 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         {
             var snapshot = _windowManager.Capture();
             var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
-            var plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
+            IReadOnlyList<TidyMove> plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
+
+            if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
+            {
+                plan = SmartPlanPostProcessor.Refine(
+                    visibleWorkingSet,
+                    plan,
+                    _tidyOptions,
+                    _smartBehaviorOptions);
+            }
+
+            _verticalFillManager.Track(
+                plan,
+                _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
+                _smartBehaviorOptions.PreferReversibleVerticalFill);
             _windowManager.Apply(plan);
 
             var message = plan.Count == 0
