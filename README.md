@@ -16,6 +16,7 @@ NeatWin has two solver modes:
 Smart models each window edge as a geometric variable. It builds weighted constraints for:
 
 - staying close to the original floating arrangement;
+- resisting width/height changes independently from position changes;
 - closing a likely small gap or small overlap between neighbors;
 - aligning near-matching edges in a row or column;
 - using nearby monitor work-area boundaries;
@@ -27,13 +28,14 @@ The approach is conceptually related to constraint-based graph-layout adjustment
 
 ### User-tunable objective
 
-The **Algorithm parameters** tab exposes both geometric inference ranges and three high-level Smart objective weights:
+The **Algorithm parameters** tab exposes both geometric inference ranges and four high-level Smart objective weights:
 
-- **Preserve layout weight** — higher values resist movement and resizing.
+- **Preserve layout weight** — higher values resist displacement from the observed arrangement.
+- **Resize resistance** — higher values preserve width/height and prefer translating the whole window when possible.
 - **Orderliness weight** — higher values favor inferred neighbor and alignment relationships.
 - **Screen usage weight** — higher values favor inferred monitor-edge anchors.
 
-Smart iteration count is also configurable. The lower-level neighbor/alignment/screen inference distances, maximum ordinary edge adjustment and maximum resize percentage remain available.
+Smart iteration count is also configurable. The lower-level neighbor/alignment/screen inference distances, maximum ordinary edge adjustment and maximum resize percentage remain available. Resize resistance is a soft preference; maximum resize percentage remains a hard cap.
 
 These settings are persisted in `%LOCALAPPDATA%\NeatWin\settings.json` and apply immediately.
 
