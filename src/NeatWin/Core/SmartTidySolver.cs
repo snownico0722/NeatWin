@@ -10,6 +10,13 @@ internal static class SmartTidySolver
     private const double MinimumWeight = 0.05;
     private const double Relaxation = 0.46;
 
+    // Once a relation has passed geometric inference it should behave close to a hard constraint
+    // at the default user weights. The user-facing Preserve/Orderliness/Screen weights still scale
+    // these values, so users can deliberately make the optimizer softer or more assertive.
+    private const double NeighborConstraintScale = 40.0;
+    private const double AlignmentConstraintScale = 14.0;
+    private const double ScreenConstraintScale = 120.0;
+
     internal static IReadOnlyList<TidyMove> CreatePlan(
         IReadOnlyList<VisibleWindow> visibleWindows,
         TidyOptions options)
@@ -65,13 +72,13 @@ internal static class SmartTidySolver
         {
             var window = windows[i];
             AddScreenAnchor(result, i, Edge.Left, window.Baseline.Left, window.Snapshot.WorkArea.Left,
-                options.ScreenSnapDistance, 5.0 * spaceUsage);
+                options.ScreenSnapDistance, ScreenConstraintScale * spaceUsage);
             AddScreenAnchor(result, i, Edge.Right, window.Baseline.Right, window.Snapshot.WorkArea.Right,
-                options.ScreenSnapDistance, 5.0 * spaceUsage);
+                options.ScreenSnapDistance, ScreenConstraintScale * spaceUsage);
             AddScreenAnchor(result, i, Edge.Top, window.Baseline.Top, window.Snapshot.WorkArea.Top,
-                options.ScreenSnapDistance, 5.0 * spaceUsage);
+                options.ScreenSnapDistance, ScreenConstraintScale * spaceUsage);
             AddScreenAnchor(result, i, Edge.Bottom, window.Baseline.Bottom, window.Snapshot.WorkArea.Bottom,
-                options.ScreenSnapDistance, 5.0 * spaceUsage);
+                options.ScreenSnapDistance, ScreenConstraintScale * spaceUsage);
         }
 
         for (var i = 0; i < windows.Count; i++)
@@ -103,13 +110,13 @@ internal static class SmartTidySolver
                             Edge.Right,
                             rightIndex,
                             Edge.Left,
-                            7.0 * orderliness * confidence));
+                            NeighborConstraintScale * orderliness * confidence));
                     }
 
                     AddPairAlignment(result, i, Edge.Top, j, Edge.Top, a.Top, b.Top,
-                        options.AlignmentSnapDistance, 2.8 * orderliness * verticalOverlap);
+                        options.AlignmentSnapDistance, AlignmentConstraintScale * orderliness * verticalOverlap);
                     AddPairAlignment(result, i, Edge.Bottom, j, Edge.Bottom, a.Bottom, b.Bottom,
-                        options.AlignmentSnapDistance, 2.8 * orderliness * verticalOverlap);
+                        options.AlignmentSnapDistance, AlignmentConstraintScale * orderliness * verticalOverlap);
                 }
 
                 if (horizontalOverlap >= options.MinimumNeighborOverlapRatio)
@@ -132,13 +139,13 @@ internal static class SmartTidySolver
                             Edge.Bottom,
                             bottomIndex,
                             Edge.Top,
-                            7.0 * orderliness * confidence));
+                            NeighborConstraintScale * orderliness * confidence));
                     }
 
                     AddPairAlignment(result, i, Edge.Left, j, Edge.Left, a.Left, b.Left,
-                        options.AlignmentSnapDistance, 2.8 * orderliness * horizontalOverlap);
+                        options.AlignmentSnapDistance, AlignmentConstraintScale * orderliness * horizontalOverlap);
                     AddPairAlignment(result, i, Edge.Right, j, Edge.Right, a.Right, b.Right,
-                        options.AlignmentSnapDistance, 2.8 * orderliness * horizontalOverlap);
+                        options.AlignmentSnapDistance, AlignmentConstraintScale * orderliness * horizontalOverlap);
                 }
             }
         }
