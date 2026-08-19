@@ -26,7 +26,7 @@ internal sealed class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(600, 500);
+        ClientSize = new Size(600, 450);
         Font = new Font("Segoe UI", 9F);
 
         var root = new TableLayoutPanel
@@ -36,9 +36,9 @@ internal sealed class MainWindow : Form
             ColumnCount = 1,
             RowCount = 5,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         Controls.Add(root);
@@ -51,23 +51,6 @@ internal sealed class MainWindow : Form
         };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var identity = new Panel { Dock = DockStyle.Fill };
-        identity.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
-            Text = "NeatWin  ·  轻轻整理当前窗口",
-            Location = new Point(0, 0),
-        });
-        identity.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "● 正在运行",
-            ForeColor = Color.ForestGreen,
-            Location = new Point(0, 28),
-        });
-        header.Controls.Add(identity, 0, 0);
 
         var modeHost = new FlowLayoutPanel
         {
