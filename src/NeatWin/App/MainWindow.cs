@@ -14,7 +14,10 @@ internal sealed class MainWindow : Form
     private readonly TidyOptionsEditor _tidyOptionsEditor;
     private bool _allowClose;
 
-    internal MainWindow(HotkeyBinding initialBinding, TidyOptions initialOptions)
+    internal MainWindow(
+        HotkeyBinding initialBinding,
+        TidyOptions initialOptions,
+        SmartBehaviorOptions initialBehaviorOptions)
     {
         Text = "NeatWin";
         StartPosition = FormStartPosition.CenterScreen;
@@ -84,7 +87,7 @@ internal sealed class MainWindow : Form
 
         var algorithmTab = new TabPage("算法参数") { Padding = new Padding(4) };
         tabs.TabPages.Add(algorithmTab);
-        _tidyOptionsEditor = new TidyOptionsEditor(initialOptions);
+        _tidyOptionsEditor = new TidyOptionsEditor(initialOptions, initialBehaviorOptions);
         _tidyOptionsEditor.OptionsChangeRequested += (_, eventArgs) =>
             TidyOptionsChangeRequested?.Invoke(this, eventArgs);
         algorithmTab.Controls.Add(_tidyOptionsEditor);
@@ -139,8 +142,12 @@ internal sealed class MainWindow : Form
         _hotkeyStatusLabel.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
     }
 
-    internal void SetTidyOptionsStatus(TidyOptions activeOptions, bool success, string message) =>
-        _tidyOptionsEditor.SetStatus(activeOptions, success, message);
+    internal void SetTidyOptionsStatus(
+        TidyOptions activeOptions,
+        SmartBehaviorOptions activeBehaviorOptions,
+        bool success,
+        string message) =>
+        _tidyOptionsEditor.SetStatus(activeOptions, activeBehaviorOptions, success, message);
 
     internal void BringToFrontFromTray()
     {
