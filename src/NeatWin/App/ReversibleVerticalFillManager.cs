@@ -5,23 +5,26 @@ using NeatWin.Windows;
 namespace NeatWin.App;
 
 /// <summary>
-/// Windows does not expose a general public API that lets one process mark another process's
-/// window as natively arranged/snapped. This helper preserves the important user-facing part of
-/// vertical snap: after NeatWin fills a window from work-area top to bottom, dragging its title
-/// bar restores the pre-tidy rectangle under the pointer.
+/// Preserves the useful part of Windows snap restore for NeatWin's vertical-fill preference.
+/// A low-level mouse hook is enabled only while at least one reversible window is tracked, so the
+/// original rectangle can be restored before the target application starts its drag loop. The
+/// existing move/size WinEvent remains as a fallback for client-drawn title bars.
 /// </summary>
 internal sealed class ReversibleVerticalFillManager : IDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<nint, RestoreEntry> _entries = new();
     private readonly NativeMethods.WinEventProc _winEventProc;
-    private readonly nint _hook;
+    private readonly NativeMethods.LowLevelMouseProc _mouseProc;
+    private readonly nint _winEventHook;
+    private nint _mouseHook;
     private bool _disposed;
 
     internal ReversibleVerticalFillManager()
     {
         _winEventProc = OnWinEvent;
-        _hook = NativeMethods.SetWinEventHook(
+        _mouseProc = OnLowLevelMouse;
+        _winEventHook = NativeMethods.SetWinEventHook(
             NativeMethods.EventSystemMoveSizeStart,
             NativeMethods.EventSystemMoveSizeStart,
             nint.Zero,
@@ -31,44 +34,50 @@ internal sealed class ReversibleVerticalFillManager : IDisposable
             NativeMethods.WinEventOutOfContext | NativeMethods.WinEventSkipOwnProcess);
     }
 
-    internal bool IsAvailable => _hook != nint.Zero;
-
     internal void Track(IReadOnlyList<TidyMove> plan, bool enabled)
     {
+        bool shouldHookMouse;
+
         lock (_gate)
         {
-            if (!enabled || !IsAvailable)
+            if (!enabled)
             {
                 _entries.Clear();
-                return;
+                shouldHookMouse = false;
             }
-
-            foreach (var move in plan)
+            else
             {
-                var window = move.Window;
-                var target = move.TargetVisualRect;
-                var workArea = window.WorkArea;
-                var targetFillsVertically =
-                    Math.Abs(target.Top - workArea.Top) <= 1 &&
-                    Math.Abs(target.Bottom - workArea.Bottom) <= 1;
-                var originalAlreadyFilled =
-                    Math.Abs(window.VisualRect.Top - workArea.Top) <= 1 &&
-                    Math.Abs(window.VisualRect.Bottom - workArea.Bottom) <= 1;
+                foreach (var move in plan)
+                {
+                    var window = move.Window;
+                    var target = move.TargetVisualRect;
+                    var workArea = window.WorkArea;
+                    var targetFillsVertically =
+                        Math.Abs(target.Top - workArea.Top) <= 1 &&
+                        Math.Abs(target.Bottom - workArea.Bottom) <= 1;
+                    var originalAlreadyFilled =
+                        Math.Abs(window.VisualRect.Top - workArea.Top) <= 1 &&
+                        Math.Abs(window.VisualRect.Bottom - workArea.Bottom) <= 1;
 
-                if (window.IsResizable && targetFillsVertically && !originalAlreadyFilled)
-                {
-                    _entries[window.Handle] = new RestoreEntry(
-                        window.VisualRect,
-                        target,
-                        workArea,
-                        window.FrameInsets);
+                    if (window.IsResizable && targetFillsVertically && !originalAlreadyFilled)
+                    {
+                        _entries[window.Handle] = new RestoreEntry(
+                            window.VisualRect,
+                            target,
+                            workArea,
+                            window.FrameInsets);
+                    }
+                    else
+                    {
+                        _entries.Remove(window.Handle);
+                    }
                 }
-                else
-                {
-                    _entries.Remove(window.Handle);
-                }
+
+                shouldHookMouse = _entries.Count > 0;
             }
         }
+
+        SetMouseHookEnabled(shouldHookMouse);
     }
 
     public void Dispose()
@@ -79,9 +88,11 @@ internal sealed class ReversibleVerticalFillManager : IDisposable
         }
 
         _disposed = true;
-        if (_hook != nint.Zero)
+        SetMouseHookEnabled(false);
+
+        if (_winEventHook != nint.Zero)
         {
-            _ = NativeMethods.UnhookWinEvent(_hook);
+            _ = NativeMethods.UnhookWinEvent(_winEventHook);
         }
 
         lock (_gate)
@@ -90,6 +101,62 @@ internal sealed class ReversibleVerticalFillManager : IDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    private void SetMouseHookEnabled(bool enabled)
+    {
+        if (_disposed && enabled)
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            if (_mouseHook == nint.Zero)
+            {
+                _mouseHook = NativeMethods.SetWindowsHookEx(
+                    NativeMethods.WhMouseLl,
+                    _mouseProc,
+                    nint.Zero,
+                    0);
+            }
+
+            return;
+        }
+
+        if (_mouseHook != nint.Zero)
+        {
+            _ = NativeMethods.UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = nint.Zero;
+        }
+    }
+
+    private nint OnLowLevelMouse(int code, nint message, nint dataPointer)
+    {
+        try
+        {
+            if (!_disposed &&
+                code >= NativeMethods.HcAction &&
+                message == NativeMethods.WmLButtonDown)
+            {
+                var data = Marshal.PtrToStructure<NativeMethods.MsllHookStruct>(dataPointer);
+                var hitWindow = NativeMethods.WindowFromPoint(data.Point);
+                var root = hitWindow == nint.Zero
+                    ? nint.Zero
+                    : NativeMethods.GetAncestor(hitWindow, NativeMethods.GaRoot);
+
+                if (root != nint.Zero)
+                {
+                    _ = TryRestoreFromPointer(root, data.Point, allowClientTitleFallback: false);
+                }
+            }
+        }
+        catch
+        {
+            // Never let a managed exception escape a global input hook.
+        }
+
+        return NativeMethods.CallNextHookEx(_mouseHook, code, message, dataPointer);
     }
 
     private void OnWinEvent(
@@ -101,36 +168,45 @@ internal sealed class ReversibleVerticalFillManager : IDisposable
         uint eventThread,
         uint eventTime)
     {
-        if (_disposed || hwnd == nint.Zero)
+        if (_disposed || hwnd == nint.Zero || !NativeMethods.GetCursorPos(out var cursor))
         {
             return;
         }
 
+        // Primary path restores on mouse-down before dragging begins. This fallback covers apps
+        // that implement a custom client-area DragMove and therefore report HTCLIENT instead of
+        // HTCAPTION during the initial hit test.
+        _ = TryRestoreFromPointer(hwnd, cursor, allowClientTitleFallback: true);
+    }
+
+    private bool TryRestoreFromPointer(
+        nint hwnd,
+        NativeMethods.Point cursor,
+        bool allowClientTitleFallback)
+    {
         RestoreEntry entry;
         lock (_gate)
         {
             if (!_entries.TryGetValue(hwnd, out entry))
             {
-                return;
+                return false;
             }
         }
 
-        if (!NativeMethods.GetCursorPos(out var cursor) ||
-            !TryGetVisualRect(hwnd, out var currentVisual) ||
-            !LooksLikeTitleBarDrag(hwnd, currentVisual, cursor))
+        if (!TryGetVisualRect(hwnd, out var currentVisual))
         {
-            return;
+            return false;
         }
 
-        // If some other tool or the application itself changed the window after NeatWin's tidy,
-        // treat that as new user intent and do not restore stale geometry.
         if (!ApproximatelyMatches(currentVisual, entry.TargetVisualRect, tolerance: 12))
         {
-            lock (_gate)
-            {
-                _entries.Remove(hwnd);
-            }
-            return;
+            RemoveEntry(hwnd);
+            return false;
+        }
+
+        if (!IsTitleBarPoint(hwnd, currentVisual, cursor, allowClientTitleFallback))
+        {
+            return false;
         }
 
         var restoredVisual = PlaceRestoreRectUnderCursor(entry, currentVisual, cursor);
@@ -148,37 +224,93 @@ internal sealed class ReversibleVerticalFillManager : IDisposable
 
         if (success)
         {
-            lock (_gate)
-            {
-                _entries.Remove(hwnd);
-            }
+            RemoveEntry(hwnd);
+        }
+
+        return success;
+    }
+
+    private void RemoveEntry(nint hwnd)
+    {
+        var noEntriesRemain = false;
+        lock (_gate)
+        {
+            _entries.Remove(hwnd);
+            noEntriesRemain = _entries.Count == 0;
+        }
+
+        if (noEntriesRemain)
+        {
+            SetMouseHookEnabled(false);
         }
     }
 
-    private static bool LooksLikeTitleBarDrag(
+    private static bool IsTitleBarPoint(
         nint hwnd,
         RectI visualRect,
-        NativeMethods.Point cursor)
+        NativeMethods.Point cursor,
+        bool allowClientTitleFallback)
     {
         if (visualRect.IsEmpty ||
-            cursor.X < visualRect.Left || cursor.X > visualRect.Right ||
-            cursor.Y < visualRect.Top || cursor.Y > visualRect.Bottom)
+            cursor.X < visualRect.Left || cursor.X >= visualRect.Right ||
+            cursor.Y < visualRect.Top || cursor.Y >= visualRect.Bottom ||
+            !TryHitTest(hwnd, cursor, out var hitTest))
+        {
+            return false;
+        }
+
+        if (hitTest == NativeMethods.HtCaption)
+        {
+            return true;
+        }
+
+        if (!allowClientTitleFallback || hitTest != NativeMethods.HtClient)
         {
             return false;
         }
 
         var dpi = Math.Max(96u, NativeMethods.GetDpiForWindow(hwnd));
         var scale = dpi / 96.0;
-        var resizeBorder = Math.Max(7, (int)Math.Round(9 * scale));
-        var titleBand = Math.Max(36, (int)Math.Round(56 * scale));
+        var titleBand = Math.Max(44, (int)Math.Round(76 * scale));
+        var horizontalInset = Math.Max(10, (int)Math.Round(12 * scale));
         var topOffset = cursor.Y - visualRect.Top;
 
-        // Exclude resize borders/corners. Custom title bars vary, so the accepted band is a little
-        // wider than the classic caption metric but still confined to the top of the window.
-        return topOffset >= resizeBorder &&
+        return topOffset >= 0 &&
                topOffset <= titleBand &&
-               cursor.X - visualRect.Left >= resizeBorder * 2 &&
-               visualRect.Right - cursor.X >= resizeBorder * 2;
+               cursor.X - visualRect.Left >= horizontalInset &&
+               visualRect.Right - cursor.X >= horizontalInset;
+    }
+
+    private static bool TryHitTest(
+        nint hwnd,
+        NativeMethods.Point cursor,
+        out int hitTest)
+    {
+        var packedPoint = PackPoint(cursor);
+        var sent = NativeMethods.SendMessageTimeout(
+            hwnd,
+            NativeMethods.WmNcHitTest,
+            nint.Zero,
+            packedPoint,
+            NativeMethods.SmtoBlock | NativeMethods.SmtoAbortIfHung,
+            40,
+            out var result);
+
+        if (sent == nint.Zero)
+        {
+            hitTest = NativeMethods.HtNowhere;
+            return false;
+        }
+
+        hitTest = unchecked((int)result);
+        return true;
+    }
+
+    private static nint PackPoint(NativeMethods.Point point)
+    {
+        var x = unchecked((ushort)(short)point.X);
+        var y = unchecked((ushort)(short)point.Y);
+        return unchecked((nint)(int)(x | (y << 16)));
     }
 
     private static RectI PlaceRestoreRectUnderCursor(

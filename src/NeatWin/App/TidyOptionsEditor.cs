@@ -45,7 +45,7 @@ internal sealed class TidyOptionsEditor : UserControl
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         Controls.Add(root);
 
         _smartGroup = new GroupBox
@@ -185,7 +185,7 @@ internal sealed class TidyOptionsEditor : UserControl
         {
             Dock = DockStyle.Fill,
             ForeColor = SystemColors.GrayText,
-            Text = "Smart 只需要表达整理意图；内部权重、距离和求解轮数由 NeatWin 自动选择。切到 Classic 才会显示原始阈值参数。",
+            Text = string.Empty,
             TextAlign = ContentAlignment.TopLeft,
         };
         root.SetColumnSpan(_statusLabel, 3);
