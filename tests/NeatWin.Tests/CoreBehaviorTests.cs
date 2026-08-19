@@ -229,6 +229,77 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void SmartMode_ResizeResistancePrefersTranslationOverChangingWidth()
+    {
+        var window = Window(1, new RectI(40, 220, 600, 500), 0);
+        var flexibleOptions = new TidyOptions(
+            AlgorithmMode: TidyAlgorithmMode.Smart,
+            PreserveLayoutWeight: 0.5,
+            ResizeResistanceWeight: 0,
+            OrderlinessWeight: 1,
+            SpaceUsageWeight: 3,
+            SmartIterations: 64,
+            NeighborSnapDistance: 0,
+            AlignmentSnapDistance: 0,
+            ScreenSnapDistance: 80,
+            MaximumEdgeAdjustment: 100,
+            MaximumSizeChangeRatio: 0.20,
+            RescueOffscreenWindows: false);
+        var resistantOptions = flexibleOptions with { ResizeResistanceWeight = 5.0 };
+
+        var flexibleTarget = TargetFor(
+            new TidyEngine().CreatePlan([Visible(window)], flexibleOptions),
+            window);
+        var resistantTarget = TargetFor(
+            new TidyEngine().CreatePlan([Visible(window)], resistantOptions),
+            window);
+
+        var flexibleWidthError = Math.Abs(flexibleTarget.Width - window.VisualRect.Width);
+        var resistantWidthError = Math.Abs(resistantTarget.Width - window.VisualRect.Width);
+
+        Assert.True(resistantWidthError < flexibleWidthError);
+        Assert.True(resistantTarget.Left < window.VisualRect.Left);
+    }
+
+    [Fact]
+    public void SmartMode_ConvergesThreeWindowTopologyWithoutRetiling()
+    {
+        var top = Window(1, new RectI(18, 16, 1880, 500), 0, foreground: true);
+        var bottomLeft = Window(2, new RectI(24, 535, 900, 526), 1);
+        var bottomRight = Window(3, new RectI(945, 531, 950, 532), 2);
+        var options = new TidyOptions(
+            AlgorithmMode: TidyAlgorithmMode.Smart,
+            PreserveLayoutWeight: 0.8,
+            ResizeResistanceWeight: 0.8,
+            OrderlinessWeight: 3.0,
+            SpaceUsageWeight: 2.0,
+            SmartIterations: 72,
+            NeighborSnapDistance: 64,
+            AlignmentSnapDistance: 30,
+            ScreenSnapDistance: 80,
+            MaximumEdgeAdjustment: 120,
+            MaximumSizeChangeRatio: 0.20,
+            RescueOffscreenWindows: true);
+
+        var plan = new TidyEngine().CreatePlan(
+            [Visible(top), Visible(bottomLeft), Visible(bottomRight)],
+            options);
+        var topTarget = TargetFor(plan, top);
+        var leftTarget = TargetFor(plan, bottomLeft);
+        var rightTarget = TargetFor(plan, bottomRight);
+
+        Assert.InRange(Math.Abs(topTarget.Left - WorkArea.Left), 0, 2);
+        Assert.InRange(Math.Abs(topTarget.Right - WorkArea.Right), 0, 2);
+        Assert.InRange(Math.Abs(leftTarget.Left - WorkArea.Left), 0, 2);
+        Assert.InRange(Math.Abs(rightTarget.Right - WorkArea.Right), 0, 2);
+        Assert.InRange(Math.Abs(leftTarget.Bottom - WorkArea.Bottom), 0, 2);
+        Assert.InRange(Math.Abs(rightTarget.Bottom - WorkArea.Bottom), 0, 2);
+        Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 2);
+        Assert.InRange(Math.Abs(topTarget.Bottom - leftTarget.Top), 0, 2);
+        Assert.InRange(Math.Abs(topTarget.Bottom - rightTarget.Top), 0, 2);
+    }
+
+    [Fact]
     public void ClassicMode_RemainsAvailableAsDeterministicFallback()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
