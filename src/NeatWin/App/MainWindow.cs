@@ -5,6 +5,7 @@ namespace NeatWin.App;
 internal sealed class MainWindow : Form
 {
     private readonly Label _activityLabel;
+    private readonly ComboBox _algorithmModeBox;
     private Label _hotkeyStatusLabel = null!;
     private CheckBox _ctrlBox = null!;
     private CheckBox _altBox = null!;
@@ -12,6 +13,7 @@ internal sealed class MainWindow : Form
     private CheckBox _winBox = null!;
     private ComboBox _keyBox = null!;
     private readonly TidyOptionsEditor _tidyOptionsEditor;
+    private bool _suppressAlgorithmModeChange;
     private bool _allowClose;
 
     internal MainWindow(
@@ -24,7 +26,7 @@ internal sealed class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(600, 520);
+        ClientSize = new Size(600, 500);
         Font = new Font("Segoe UI", 9F);
 
         var root = new TableLayoutPanel
@@ -36,29 +38,64 @@ internal sealed class MainWindow : Form
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         Controls.Add(root);
 
-        var header = new Panel { Dock = DockStyle.Fill };
-        var title = new Label
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var identity = new Panel { Dock = DockStyle.Fill };
+        identity.Controls.Add(new Label
         {
             AutoSize = true,
             Font = new Font(Font, FontStyle.Bold),
             Text = "NeatWin  ·  轻轻整理当前窗口",
             Location = new Point(0, 0),
-        };
-        var runningLabel = new Label
+        });
+        identity.Controls.Add(new Label
         {
             AutoSize = true,
             Text = "● 正在运行",
             ForeColor = Color.ForestGreen,
             Location = new Point(0, 28),
+        });
+        header.Controls.Add(identity, 0, 0);
+
+        var modeHost = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0),
         };
-        header.Controls.Add(title);
-        header.Controls.Add(runningLabel);
+        modeHost.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "算法",
+            Margin = new Padding(0, 7, 8, 0),
+        });
+        _algorithmModeBox = new ComboBox
+        {
+            Width = 154,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Margin = new Padding(0, 2, 0, 0),
+        };
+        _algorithmModeBox.Items.Add(new AlgorithmModeOption(TidyAlgorithmMode.Smart, "Smart · 智能整理"));
+        _algorithmModeBox.Items.Add(new AlgorithmModeOption(TidyAlgorithmMode.Classic, "Classic · 阈值规则"));
+        modeHost.Controls.Add(_algorithmModeBox);
+        header.Controls.Add(modeHost, 1, 0);
         root.Controls.Add(header, 0, 0);
+
+        SelectAlgorithmMode(initialOptions.AlgorithmMode);
 
         var tidyButton = new Button
         {
@@ -73,7 +110,7 @@ internal sealed class MainWindow : Form
         _activityLabel = new Label
         {
             Dock = DockStyle.Fill,
-            Text = "可直接点击上面的按钮；快捷键只是可选入口。",
+            Text = string.Empty,
             TextAlign = ContentAlignment.MiddleLeft,
         };
         root.Controls.Add(_activityLabel, 0, 2);
@@ -85,39 +122,28 @@ internal sealed class MainWindow : Form
         tabs.TabPages.Add(hotkeyTab);
         BuildHotkeyTab(hotkeyTab, initialBinding);
 
-        var algorithmTab = new TabPage("算法参数") { Padding = new Padding(4) };
+        var algorithmTab = new TabPage("整理设置") { Padding = new Padding(4) };
         tabs.TabPages.Add(algorithmTab);
         _tidyOptionsEditor = new TidyOptionsEditor(initialOptions, initialBehaviorOptions);
         _tidyOptionsEditor.OptionsChangeRequested += (_, eventArgs) =>
             TidyOptionsChangeRequested?.Invoke(this, eventArgs);
         algorithmTab.Controls.Add(_tidyOptionsEditor);
 
-        var bottom = new TableLayoutPanel
+        _algorithmModeBox.SelectedIndexChanged += OnAlgorithmModeChanged;
+
+        var bottom = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
         };
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var hint = new Label
-        {
-            Dock = DockStyle.Fill,
-            Text = "关闭窗口后仍驻留托盘；双击托盘图标可重新打开。",
-            ForeColor = SystemColors.GrayText,
-            TextAlign = ContentAlignment.MiddleLeft,
-        };
-        bottom.Controls.Add(hint, 0, 0);
-
         var exitButton = new Button
         {
             Text = "退出 NeatWin",
             AutoSize = true,
-            Anchor = AnchorStyles.Right,
         };
         exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
-        bottom.Controls.Add(exitButton, 1, 0);
+        bottom.Controls.Add(exitButton);
         root.Controls.Add(bottom, 0, 4);
 
         SetHotkeyControls(initialBinding);
@@ -146,8 +172,11 @@ internal sealed class MainWindow : Form
         TidyOptions activeOptions,
         SmartBehaviorOptions activeBehaviorOptions,
         bool success,
-        string message) =>
+        string message)
+    {
         _tidyOptionsEditor.SetStatus(activeOptions, activeBehaviorOptions, success, message);
+        SelectAlgorithmMode(activeOptions.AlgorithmMode);
+    }
 
     internal void BringToFrontFromTray()
     {
@@ -169,6 +198,39 @@ internal sealed class MainWindow : Form
     {
         _allowClose = true;
         Close();
+    }
+
+    private void OnAlgorithmModeChanged(object? sender, EventArgs eventArgs)
+    {
+        if (_suppressAlgorithmModeChange ||
+            _algorithmModeBox.SelectedItem is not AlgorithmModeOption option)
+        {
+            return;
+        }
+
+        _tidyOptionsEditor.ChangeAlgorithmMode(option.Mode);
+    }
+
+    private void SelectAlgorithmMode(TidyAlgorithmMode mode)
+    {
+        _suppressAlgorithmModeChange = true;
+        try
+        {
+            for (var index = 0; index < _algorithmModeBox.Items.Count; index++)
+            {
+                if (_algorithmModeBox.Items[index] is AlgorithmModeOption item && item.Mode == mode)
+                {
+                    _algorithmModeBox.SelectedIndex = index;
+                    return;
+                }
+            }
+
+            _algorithmModeBox.SelectedIndex = 0;
+        }
+        finally
+        {
+            _suppressAlgorithmModeChange = false;
+        }
     }
 
     private void BuildHotkeyTab(TabPage tab, HotkeyBinding initialBinding)
@@ -312,6 +374,11 @@ internal sealed class MainWindow : Form
         {
             destination.Add((Keys)value);
         }
+    }
+
+    private sealed record AlgorithmModeOption(TidyAlgorithmMode Mode, string Name)
+    {
+        public override string ToString() => Name;
     }
 
     private sealed record HotkeyKeyOption(Keys Key)

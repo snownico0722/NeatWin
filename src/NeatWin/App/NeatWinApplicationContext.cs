@@ -57,7 +57,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         else
         {
             _mainWindow.SetHotkeyRegistration(requestedHotkey, success: false, hotkeyMessage);
-            _mainWindow.SetActivity("程序已运行；快捷键不可用时仍可点击“整理当前可见窗口”。", error: true);
         }
 
         _mainWindow.Show();

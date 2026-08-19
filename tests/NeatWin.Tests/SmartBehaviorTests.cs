@@ -52,7 +52,7 @@ public sealed class SmartBehaviorTests
         var leftTarget = TargetFor(plan, left);
         var rightTarget = TargetFor(plan, right);
 
-        Assert.True(OverlapArea(leftTarget, rightTarget) == 0);
+        Assert.Equal(0, OverlapArea(leftTarget, rightTarget));
     }
 
     [Fact]
@@ -78,6 +78,51 @@ public sealed class SmartBehaviorTests
 
         Assert.True(strongOverlap < gentleOverlap);
         Assert.Equal(0, strongOverlap);
+    }
+
+    [Fact]
+    public void BalancedOverlapAvoidance_PrefersVerticalSeparationForSharedRightColumn()
+    {
+        var a = Window(1, new RectI(100, 100, 700, 800), 0);
+        var b = Window(2, new RectI(900, 200, 700, 400), 1);
+        var c = Window(3, new RectI(1320, 400, 600, 400), 2);
+
+        var plan = SmartPlanPostProcessor.Refine(
+            [Visible(a), Visible(b), Visible(c)],
+            [],
+            new TidyOptions(RescueOffscreenWindows: true),
+            new SmartBehaviorOptions(OverlapAvoidance: SmartOverlapAvoidance.Balanced));
+
+        var aTarget = TargetFor(plan, a);
+        var bTarget = TargetFor(plan, b);
+        var cTarget = TargetFor(plan, c);
+
+        Assert.Equal(a.VisualRect, aTarget);
+        Assert.Equal(b.VisualRect.Left, bTarget.Left);
+        Assert.Equal(c.VisualRect.Left, cTarget.Left);
+        Assert.True(bTarget.Top < b.VisualRect.Top);
+        Assert.True(cTarget.Top > c.VisualRect.Top);
+        Assert.Equal(0, OverlapArea(bTarget, cTarget));
+    }
+
+    [Fact]
+    public void OverlapAvoidance_ReallocatesBlockedMovementToWindowWithFreeSpace()
+    {
+        var top = Window(1, new RectI(1000, 0, 700, 500), 0);
+        var bottom = Window(2, new RectI(1000, 400, 700, 500), 1);
+
+        var plan = SmartPlanPostProcessor.Refine(
+            [Visible(top), Visible(bottom)],
+            [],
+            new TidyOptions(RescueOffscreenWindows: true),
+            new SmartBehaviorOptions(OverlapAvoidance: SmartOverlapAvoidance.Balanced));
+
+        var topTarget = TargetFor(plan, top);
+        var bottomTarget = TargetFor(plan, bottom);
+
+        Assert.Equal(0, topTarget.Top);
+        Assert.True(bottomTarget.Top >= 501);
+        Assert.Equal(0, OverlapArea(topTarget, bottomTarget));
     }
 
     private static long OverlapArea(RectI a, RectI b) => a.Intersect(b).Area;

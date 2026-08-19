@@ -80,7 +80,7 @@ public static class SmartPlanPostProcessor
 
         foreach (var state in states)
         {
-            if (!state.Snapshot.IsResizable)
+            if (!state.Snapshot.IsResizable || HasLikelyVerticalPeer(state, states))
             {
                 continue;
             }
@@ -129,6 +129,43 @@ public static class SmartPlanPostProcessor
         }
     }
 
+    private static bool HasLikelyVerticalPeer(State state, IReadOnlyList<State> states)
+    {
+        foreach (var other in states)
+        {
+            if (ReferenceEquals(state, other))
+            {
+                continue;
+            }
+
+            var horizontalOverlap = state.Original.HorizontalOverlapRatio(other.Original);
+            if (horizontalOverlap < 0.55)
+            {
+                continue;
+            }
+
+            var minimumHeight = Math.Max(1, Math.Min(state.Original.Height, other.Original.Height));
+            var centerDelta = Math.Abs(CenterY(state.Original) - CenterY(other.Original)) / minimumHeight;
+            if (centerDelta < 0.18)
+            {
+                continue;
+            }
+
+            var verticalGap = RectI.IntervalGap(
+                state.Original.Top,
+                state.Original.Bottom,
+                other.Original.Top,
+                other.Original.Bottom);
+            var peerRadius = Math.Max(72, state.Snapshot.WorkArea.Height / 9);
+            if (state.Original.VerticalOverlapRatio(other.Original) > 0 || verticalGap <= peerRadius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static void ApplyOverlapAvoidance(
         List<State> states,
         TidyOptions options,
@@ -141,9 +178,9 @@ public static class SmartPlanPostProcessor
 
         var profile = level switch
         {
-            SmartOverlapAvoidance.Gentle => new OverlapProfile(0.12, 2, 72),
-            SmartOverlapAvoidance.Strong => new OverlapProfile(1.00, 8, 320),
-            _ => new OverlapProfile(0.36, 5, 176),
+            SmartOverlapAvoidance.Gentle => new OverlapProfile(0.16, 3, 96),
+            SmartOverlapAvoidance.Strong => new OverlapProfile(1.00, 12, 520),
+            _ => new OverlapProfile(0.72, 8, 280),
         };
 
         var strengthBudget = options.SmartStrength switch
@@ -179,17 +216,18 @@ public static class SmartPlanPostProcessor
                         continue;
                     }
 
-                    var normalizedX = (double)overlapX / Math.Max(1, Math.Min(a.Current.Width, b.Current.Width));
-                    var normalizedY = (double)overlapY / Math.Max(1, Math.Min(a.Current.Height, b.Current.Height));
+                    var axis = ChooseSeparationAxis(
+                        states,
+                        a,
+                        b,
+                        overlapX,
+                        overlapY,
+                        movementBudget,
+                        options.RescueOffscreenWindows);
 
-                    if (normalizedX <= normalizedY)
-                    {
-                        changed |= SeparateHorizontally(a, b, overlapX, movementBudget, options.RescueOffscreenWindows);
-                    }
-                    else
-                    {
-                        changed |= SeparateVertically(a, b, overlapY, movementBudget, options.RescueOffscreenWindows);
-                    }
+                    changed |= axis == SeparationAxis.Vertical
+                        ? SeparateVertically(a, b, overlapY, movementBudget, options.RescueOffscreenWindows)
+                        : SeparateHorizontally(a, b, overlapX, movementBudget, options.RescueOffscreenWindows);
                 }
             }
 
@@ -198,6 +236,119 @@ public static class SmartPlanPostProcessor
                 break;
             }
         }
+    }
+
+    private static SeparationAxis ChooseSeparationAxis(
+        IReadOnlyList<State> states,
+        State a,
+        State b,
+        int overlapX,
+        int overlapY,
+        int movementBudget,
+        bool keepInsideWorkArea)
+    {
+        var minimumWidth = Math.Max(1, Math.Min(a.Original.Width, b.Original.Width));
+        var minimumHeight = Math.Max(1, Math.Min(a.Original.Height, b.Original.Height));
+        var horizontalOrderSignal = Math.Abs(CenterX(a.Original) - CenterX(b.Original)) / minimumWidth;
+        var verticalOrderSignal = Math.Abs(CenterY(a.Original) - CenterY(b.Original)) / minimumHeight;
+
+        var columnEvidence =
+            a.Original.HorizontalOverlapRatio(b.Original) *
+            (0.55 + Math.Min(1.5, verticalOrderSignal));
+        var rowEvidence =
+            a.Original.VerticalOverlapRatio(b.Original) *
+            (0.55 + Math.Min(1.5, horizontalOrderSignal));
+
+        foreach (var anchor in states)
+        {
+            if (ReferenceEquals(anchor, a) || ReferenceEquals(anchor, b))
+            {
+                continue;
+            }
+
+            if (SharesColumnContext(anchor, a, b))
+            {
+                columnEvidence += 0.75;
+            }
+
+            if (SharesRowContext(anchor, a, b))
+            {
+                rowEvidence += 0.75;
+            }
+        }
+
+        var horizontalCapacity = GetHorizontalSeparationCapacity(a, b, movementBudget, keepInsideWorkArea);
+        var verticalCapacity = GetVerticalSeparationCapacity(a, b, movementBudget, keepInsideWorkArea);
+
+        // Structural intent wins while that axis still has useful travel. This is what keeps an
+        // A | (B over C) arrangement as a left column plus right stack instead of pushing B/C apart
+        // horizontally and destroying the user's apparent topology.
+        if (columnEvidence > rowEvidence + 0.15 && verticalCapacity > 0)
+        {
+            return SeparationAxis.Vertical;
+        }
+
+        if (rowEvidence > columnEvidence + 0.15 && horizontalCapacity > 0)
+        {
+            return SeparationAxis.Horizontal;
+        }
+
+        if (verticalCapacity <= 0)
+        {
+            return SeparationAxis.Horizontal;
+        }
+
+        if (horizontalCapacity <= 0)
+        {
+            return SeparationAxis.Vertical;
+        }
+
+        var normalizedX = (double)overlapX / Math.Max(1, Math.Min(a.Current.Width, b.Current.Width));
+        var normalizedY = (double)overlapY / Math.Max(1, Math.Min(a.Current.Height, b.Current.Height));
+        var horizontalFeasibility = Math.Min(1.0, (double)horizontalCapacity / (overlapX + 1));
+        var verticalFeasibility = Math.Min(1.0, (double)verticalCapacity / (overlapY + 1));
+        var horizontalCost = normalizedX / Math.Max(0.25, horizontalFeasibility);
+        var verticalCost = normalizedY / Math.Max(0.25, verticalFeasibility);
+
+        return verticalCost < horizontalCost
+            ? SeparationAxis.Vertical
+            : SeparationAxis.Horizontal;
+    }
+
+    private static bool SharesColumnContext(State anchor, State a, State b)
+    {
+        var tolerance = Math.Max(32, anchor.Snapshot.WorkArea.Width / 50);
+        var bothRight =
+            a.Original.Left >= anchor.Original.Right - tolerance &&
+            b.Original.Left >= anchor.Original.Right - tolerance;
+        var bothLeft =
+            a.Original.Right <= anchor.Original.Left + tolerance &&
+            b.Original.Right <= anchor.Original.Left + tolerance;
+        if (!bothRight && !bothLeft)
+        {
+            return false;
+        }
+
+        return a.Original.VerticalOverlapRatio(anchor.Original) >= 0.20 &&
+               b.Original.VerticalOverlapRatio(anchor.Original) >= 0.20;
+    }
+
+    private static bool SharesRowContext(State anchor, State a, State b)
+    {
+        var tolerance = Math.Max(24, anchor.Snapshot.WorkArea.Height / 45);
+        var bothBelow =
+            a.Original.Top >= anchor.Original.Bottom - tolerance &&
+            b.Original.Top >= anchor.Original.Bottom - tolerance;
+        var bothAbove =
+            a.Original.Bottom <= anchor.Original.Top + tolerance &&
+            b.Original.Bottom <= anchor.Original.Top + tolerance;
+        if (!bothBelow && !bothAbove)
+        {
+            return false;
+        }
+
+        return a.Original.HorizontalOverlapRatio(anchor.Original) >= 0.20 &&
+               b.Original.HorizontalOverlapRatio(anchor.Original) >= 0.20;
     }
 
     private static bool SeparateHorizontally(
@@ -211,7 +362,14 @@ public static class SmartPlanPostProcessor
         var left = aBeforeB ? a : b;
         var right = aBeforeB ? b : a;
         var total = overlap + 1;
-        SplitMovement(left, right, total, out var leftShare, out var rightShare);
+        var leftCapacity = CapacityLeft(left, movementBudget, keepInsideWorkArea);
+        var rightCapacity = CapacityRight(right, movementBudget, keepInsideWorkArea);
+        AllocateMovement(left, right, total, leftCapacity, rightCapacity, out var leftShare, out var rightShare);
+
+        if (leftShare == 0 && rightShare == 0)
+        {
+            return false;
+        }
 
         var beforeLeft = left.Current;
         var beforeRight = right.Current;
@@ -238,7 +396,14 @@ public static class SmartPlanPostProcessor
         var top = aBeforeB ? a : b;
         var bottom = aBeforeB ? b : a;
         var total = overlap + 1;
-        SplitMovement(top, bottom, total, out var topShare, out var bottomShare);
+        var topCapacity = CapacityUp(top, movementBudget, keepInsideWorkArea);
+        var bottomCapacity = CapacityDown(bottom, movementBudget, keepInsideWorkArea);
+        AllocateMovement(top, bottom, total, topCapacity, bottomCapacity, out var topShare, out var bottomShare);
+
+        if (topShare == 0 && bottomShare == 0)
+        {
+            return false;
+        }
 
         var beforeTop = top.Current;
         var beforeBottom = bottom.Current;
@@ -254,18 +419,123 @@ public static class SmartPlanPostProcessor
         return top.Current != beforeTop || bottom.Current != beforeBottom;
     }
 
-    private static void SplitMovement(
+    private static int GetHorizontalSeparationCapacity(
+        State a,
+        State b,
+        int movementBudget,
+        bool keepInsideWorkArea)
+    {
+        var aBeforeB = CenterX(a.Current) <= CenterX(b.Current);
+        var left = aBeforeB ? a : b;
+        var right = aBeforeB ? b : a;
+        return CapacityLeft(left, movementBudget, keepInsideWorkArea) +
+               CapacityRight(right, movementBudget, keepInsideWorkArea);
+    }
+
+    private static int GetVerticalSeparationCapacity(
+        State a,
+        State b,
+        int movementBudget,
+        bool keepInsideWorkArea)
+    {
+        var aBeforeB = CenterY(a.Current) <= CenterY(b.Current);
+        var top = aBeforeB ? a : b;
+        var bottom = aBeforeB ? b : a;
+        return CapacityUp(top, movementBudget, keepInsideWorkArea) +
+               CapacityDown(bottom, movementBudget, keepInsideWorkArea);
+    }
+
+    private static int CapacityLeft(State state, int budget, bool keepInsideWorkArea)
+    {
+        var minimumLeft = state.Original.Left - budget;
+        if (keepInsideWorkArea && state.Current.Width <= state.Snapshot.WorkArea.Width)
+        {
+            minimumLeft = Math.Max(minimumLeft, state.Snapshot.WorkArea.Left);
+        }
+
+        return Math.Max(0, state.Current.Left - minimumLeft);
+    }
+
+    private static int CapacityRight(State state, int budget, bool keepInsideWorkArea)
+    {
+        var maximumLeft = state.Original.Left + budget;
+        if (keepInsideWorkArea && state.Current.Width <= state.Snapshot.WorkArea.Width)
+        {
+            maximumLeft = Math.Min(maximumLeft, state.Snapshot.WorkArea.Right - state.Current.Width);
+        }
+
+        return Math.Max(0, maximumLeft - state.Current.Left);
+    }
+
+    private static int CapacityUp(State state, int budget, bool keepInsideWorkArea)
+    {
+        var minimumTop = state.Original.Top - budget;
+        if (keepInsideWorkArea && state.Current.Height <= state.Snapshot.WorkArea.Height)
+        {
+            minimumTop = Math.Max(minimumTop, state.Snapshot.WorkArea.Top);
+        }
+
+        return Math.Max(0, state.Current.Top - minimumTop);
+    }
+
+    private static int CapacityDown(State state, int budget, bool keepInsideWorkArea)
+    {
+        var maximumTop = state.Original.Top + budget;
+        if (keepInsideWorkArea && state.Current.Height <= state.Snapshot.WorkArea.Height)
+        {
+            maximumTop = Math.Min(maximumTop, state.Snapshot.WorkArea.Bottom - state.Current.Height);
+        }
+
+        return Math.Max(0, maximumTop - state.Current.Top);
+    }
+
+    private static void AllocateMovement(
         State first,
         State second,
         int total,
+        int firstCapacity,
+        int secondCapacity,
         out int firstShare,
         out int secondShare)
     {
+        if (total <= 0 || firstCapacity + secondCapacity <= 0)
+        {
+            firstShare = 0;
+            secondShare = 0;
+            return;
+        }
+
         var firstMobility = 1.0 / Math.Max(0.1, first.Importance);
         var secondMobility = 1.0 / Math.Max(0.1, second.Importance);
         var sum = firstMobility + secondMobility;
-        firstShare = (int)Math.Round(total * firstMobility / sum);
-        secondShare = total - firstShare;
+        var desiredFirst = (int)Math.Round(total * firstMobility / sum);
+
+        firstShare = Math.Min(desiredFirst, firstCapacity);
+        secondShare = Math.Min(total - firstShare, secondCapacity);
+
+        var remaining = total - firstShare - secondShare;
+        while (remaining > 0)
+        {
+            var firstRoom = firstCapacity - firstShare;
+            var secondRoom = secondCapacity - secondShare;
+            if (firstRoom <= 0 && secondRoom <= 0)
+            {
+                break;
+            }
+
+            if ((firstMobility >= secondMobility && firstRoom > 0) || secondRoom <= 0)
+            {
+                var take = Math.Min(remaining, firstRoom);
+                firstShare += take;
+                remaining -= take;
+            }
+            else
+            {
+                var take = Math.Min(remaining, secondRoom);
+                secondShare += take;
+                remaining -= take;
+            }
+        }
     }
 
     private static RectI FitInsideWorkArea(WindowSnapshot snapshot, RectI rect)
@@ -328,6 +598,12 @@ public static class SmartPlanPostProcessor
             var clamped = Math.Clamp(desired, Original.Y - budget, Original.Y + budget);
             Current = new RectI(Current.X, clamped, Current.Width, Current.Height);
         }
+    }
+
+    private enum SeparationAxis
+    {
+        Horizontal,
+        Vertical,
     }
 
     private readonly record struct OverlapProfile(

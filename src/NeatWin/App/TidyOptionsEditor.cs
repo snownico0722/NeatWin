@@ -4,7 +4,6 @@ namespace NeatWin.App;
 
 internal sealed class TidyOptionsEditor : UserControl
 {
-    private readonly ComboBox _algorithmMode;
     private readonly GroupBox _smartGroup;
     private readonly ComboBox _smartStrength;
     private readonly ComboBox _smartHitTendency;
@@ -37,37 +36,17 @@ internal sealed class TidyOptionsEditor : UserControl
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 3,
-            RowCount = 6,
+            RowCount = 5,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
         Controls.Add(root);
-
-        root.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "算法模式",
-            Anchor = AnchorStyles.Left,
-        }, 0, 0);
-
-        _algorithmMode = new ComboBox
-        {
-            Dock = DockStyle.Fill,
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Margin = new Padding(4),
-        };
-        _algorithmMode.Items.Add(new AlgorithmModeOption(TidyAlgorithmMode.Smart, "Smart · 智能整理"));
-        _algorithmMode.Items.Add(new AlgorithmModeOption(TidyAlgorithmMode.Classic, "Classic · 阈值规则"));
-        _algorithmMode.SelectedIndexChanged += (_, _) => UpdateModeVisibility();
-        root.SetColumnSpan(_algorithmMode, 2);
-        root.Controls.Add(_algorithmMode, 1, 0);
 
         _smartGroup = new GroupBox
         {
@@ -78,7 +57,7 @@ internal sealed class TidyOptionsEditor : UserControl
             Padding = new Padding(10),
         };
         root.SetColumnSpan(_smartGroup, 3);
-        root.Controls.Add(_smartGroup, 0, 1);
+        root.Controls.Add(_smartGroup, 0, 0);
 
         var smartLayout = new TableLayoutPanel
         {
@@ -151,7 +130,7 @@ internal sealed class TidyOptionsEditor : UserControl
             Padding = new Padding(10),
         };
         root.SetColumnSpan(_classicGroup, 3);
-        root.Controls.Add(_classicGroup, 0, 2);
+        root.Controls.Add(_classicGroup, 0, 1);
 
         var classicLayout = new TableLayoutPanel
         {
@@ -183,7 +162,7 @@ internal sealed class TidyOptionsEditor : UserControl
             Anchor = AnchorStyles.Left,
         };
         root.SetColumnSpan(_rescueOffscreen, 3);
-        root.Controls.Add(_rescueOffscreen, 0, 3);
+        root.Controls.Add(_rescueOffscreen, 0, 2);
 
         var buttons = new FlowLayoutPanel
         {
@@ -194,11 +173,13 @@ internal sealed class TidyOptionsEditor : UserControl
         var apply = new Button { Text = "保存并应用", AutoSize = true };
         apply.Click += (_, _) => ApplyFromControls();
         var reset = new Button { Text = "恢复默认", AutoSize = true };
-        reset.Click += (_, _) => SetControls(new TidyOptions(), new SmartBehaviorOptions());
+        reset.Click += (_, _) => SetControls(
+            new TidyOptions(AlgorithmMode: _currentOptions.AlgorithmMode),
+            new SmartBehaviorOptions());
         buttons.Controls.Add(apply);
         buttons.Controls.Add(reset);
         root.SetColumnSpan(buttons, 3);
-        root.Controls.Add(buttons, 0, 4);
+        root.Controls.Add(buttons, 0, 3);
 
         _statusLabel = new Label
         {
@@ -208,7 +189,7 @@ internal sealed class TidyOptionsEditor : UserControl
             TextAlign = ContentAlignment.TopLeft,
         };
         root.SetColumnSpan(_statusLabel, 3);
-        root.Controls.Add(_statusLabel, 0, 5);
+        root.Controls.Add(_statusLabel, 0, 4);
 
         SetControls(initialOptions, initialBehaviorOptions);
     }
@@ -228,15 +209,26 @@ internal sealed class TidyOptionsEditor : UserControl
         _statusLabel.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
     }
 
+    internal void ChangeAlgorithmMode(TidyAlgorithmMode mode)
+    {
+        if (_currentOptions.AlgorithmMode == mode)
+        {
+            UpdateModeVisibility();
+            return;
+        }
+
+        _currentOptions = _currentOptions with { AlgorithmMode = mode };
+        UpdateModeVisibility();
+        OptionsChangeRequested?.Invoke(
+            this,
+            new TidyOptionsChangeEventArgs(_currentOptions, _currentBehaviorOptions));
+    }
+
     private void ApplyFromControls()
     {
-        var mode = _algorithmMode.SelectedItem is AlgorithmModeOption selectedMode
-            ? selectedMode.Mode
-            : TidyAlgorithmMode.Smart;
-
+        var mode = _currentOptions.AlgorithmMode;
         var options = _currentOptions with
         {
-            AlgorithmMode = mode,
             RescueOffscreenWindows = _rescueOffscreen.Checked,
         };
         var behaviorOptions = _currentBehaviorOptions;
@@ -273,7 +265,6 @@ internal sealed class TidyOptionsEditor : UserControl
 
     private void SetControls(TidyOptions options, SmartBehaviorOptions behaviorOptions)
     {
-        SelectAlgorithmMode(options.AlgorithmMode);
         SelectChoice(_smartStrength, options.SmartStrength);
         SelectChoice(_smartHitTendency, options.SmartHitTendency);
         SelectChoice(_smartSizeTendency, options.SmartSizeTendency);
@@ -293,24 +284,9 @@ internal sealed class TidyOptionsEditor : UserControl
         UpdateModeVisibility();
     }
 
-    private void SelectAlgorithmMode(TidyAlgorithmMode mode)
-    {
-        for (var index = 0; index < _algorithmMode.Items.Count; index++)
-        {
-            if (_algorithmMode.Items[index] is AlgorithmModeOption item && item.Mode == mode)
-            {
-                _algorithmMode.SelectedIndex = index;
-                return;
-            }
-        }
-
-        _algorithmMode.SelectedIndex = 0;
-    }
-
     private void UpdateModeVisibility()
     {
-        var smart = _algorithmMode.SelectedItem is not AlgorithmModeOption mode ||
-                    mode.Mode == TidyAlgorithmMode.Smart;
+        var smart = _currentOptions.AlgorithmMode == TidyAlgorithmMode.Smart;
         _smartGroup.Visible = smart;
         _classicGroup.Visible = !smart;
     }
@@ -412,11 +388,6 @@ internal sealed class TidyOptionsEditor : UserControl
 
     private static decimal ClampToDecimal(decimal value, decimal minimum, decimal maximum) =>
         Math.Min(maximum, Math.Max(minimum, value));
-
-    private sealed record AlgorithmModeOption(TidyAlgorithmMode Mode, string Name)
-    {
-        public override string ToString() => Name;
-    }
 
     private sealed record ChoiceOption<T>(T Value, string Name)
         where T : struct, Enum
