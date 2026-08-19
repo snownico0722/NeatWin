@@ -43,6 +43,7 @@ internal sealed class SettingsStore
         {
             AlgorithmMode = mode,
             PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
+            ResizeResistanceWeight = Math.Clamp(stored.ResizeResistanceWeight ?? defaults.ResizeResistanceWeight, 0.0, 5.0),
             OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
             SpaceUsageWeight = Math.Clamp(stored.SpaceUsageWeight ?? defaults.SpaceUsageWeight, 0.0, 5.0),
             SmartIterations = Math.Clamp(stored.SmartIterations ?? defaults.SmartIterations, 4, 128),
@@ -72,6 +73,7 @@ internal sealed class SettingsStore
         var settings = LoadStoredSettings();
         settings.AlgorithmMode = (int)options.AlgorithmMode;
         settings.PreserveLayoutWeight = options.PreserveLayoutWeight;
+        settings.ResizeResistanceWeight = options.ResizeResistanceWeight;
         settings.OrderlinessWeight = options.OrderlinessWeight;
         settings.SpaceUsageWeight = options.SpaceUsageWeight;
         settings.SmartIterations = options.SmartIterations;
@@ -125,6 +127,7 @@ internal sealed class SettingsStore
 
         public int? AlgorithmMode { get; set; }
         public double? PreserveLayoutWeight { get; set; }
+        public double? ResizeResistanceWeight { get; set; }
         public double? OrderlinessWeight { get; set; }
         public double? SpaceUsageWeight { get; set; }
         public int? SmartIterations { get; set; }
