@@ -201,7 +201,7 @@ public sealed class CoreBehaviorTests
     public void SmartMode_HitTendencyControlsWhichRelationsAreInferred()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
-        var right = Window(2, new RectI(780, 200, 500, 500), 1);
+        var right = Window(2, new RectI(760, 200, 500, 500), 1);
         var cautious = new TidyOptions(
             SmartHitTendency: SmartHitTendency.Cautious,
             RescueOffscreenWindows: false);
