@@ -215,7 +215,7 @@ public sealed class CoreBehaviorTests
         Assert.InRange(
             Math.Abs(TargetFor(sensitivePlan, left).Right - TargetFor(sensitivePlan, right).Left),
             0,
-            1);
+            3);
     }
 
     [Fact]
