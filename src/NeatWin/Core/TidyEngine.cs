@@ -9,7 +9,7 @@ public enum TidyAlgorithmMode
 public sealed record TidyOptions(
     TidyAlgorithmMode AlgorithmMode = TidyAlgorithmMode.Smart,
     double PreserveLayoutWeight = 1.0,
-    double ResizeResistanceWeight = 1.6,
+    double ResizeResistanceWeight = 0.1,
     double OrderlinessWeight = 1.8,
     double SpaceUsageWeight = 1.0,
     int SmartIterations = 36,
