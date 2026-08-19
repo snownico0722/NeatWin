@@ -61,6 +61,12 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void TidyOptions_DefaultToSmartMode()
+    {
+        Assert.Equal(TidyAlgorithmMode.Smart, new TidyOptions().AlgorithmMode);
+    }
+
+    [Fact]
     public void TidyEngine_ClosesSmallHorizontalGap()
     {
         var left = Window(1, new RectI(0, 0, 900, 1080), 0);
@@ -70,9 +76,9 @@ public sealed class CoreBehaviorTests
         var leftTarget = TargetFor(plan, left);
         var rightTarget = TargetFor(plan, right);
 
-        Assert.Equal(leftTarget.Right, rightTarget.Left);
-        Assert.Equal(0, leftTarget.Left);
-        Assert.Equal(1920, rightTarget.Right);
+        Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 1);
+        Assert.InRange(Math.Abs(leftTarget.Left), 0, 1);
+        Assert.InRange(Math.Abs(1920 - rightTarget.Right), 0, 1);
     }
 
     [Fact]
@@ -85,7 +91,7 @@ public sealed class CoreBehaviorTests
         var leftTarget = TargetFor(plan, left);
         var rightTarget = TargetFor(plan, right);
 
-        Assert.Equal(leftTarget.Right, rightTarget.Left);
+        Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 1);
     }
 
     [Fact]
@@ -96,7 +102,10 @@ public sealed class CoreBehaviorTests
         var plan = new TidyEngine().CreatePlan([Visible(window)]);
         var target = TargetFor(plan, window);
 
-        Assert.Equal(WorkArea, target);
+        Assert.InRange(Math.Abs(target.Left - WorkArea.Left), 0, 1);
+        Assert.InRange(Math.Abs(target.Top - WorkArea.Top), 0, 1);
+        Assert.InRange(Math.Abs(target.Right - WorkArea.Right), 0, 1);
+        Assert.InRange(Math.Abs(target.Bottom - WorkArea.Bottom), 0, 1);
     }
 
     [Fact]
@@ -185,7 +194,57 @@ public sealed class CoreBehaviorTests
 
         Assert.Empty(conservativePlan);
         Assert.NotEmpty(generousPlan);
-        Assert.Equal(TargetFor(generousPlan, left).Right, TargetFor(generousPlan, right).Left);
+        Assert.InRange(
+            Math.Abs(TargetFor(generousPlan, left).Right - TargetFor(generousPlan, right).Left),
+            0,
+            1);
+    }
+
+    [Fact]
+    public void SmartMode_OrderlinessWeightControlsHowStronglyRelationsConverge()
+    {
+        var left = Window(1, new RectI(200, 200, 500, 500), 0);
+        var right = Window(2, new RectI(748, 200, 500, 500), 1);
+        var baseOptions = new TidyOptions(
+            AlgorithmMode: TidyAlgorithmMode.Smart,
+            PreserveLayoutWeight: 2.0,
+            OrderlinessWeight: 0.15,
+            SpaceUsageWeight: 0,
+            SmartIterations: 48,
+            NeighborSnapDistance: 60,
+            AlignmentSnapDistance: 0,
+            ScreenSnapDistance: 0,
+            MaximumEdgeAdjustment: 100,
+            RescueOffscreenWindows: false);
+
+        var weakPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], baseOptions);
+        var strongPlan = new TidyEngine().CreatePlan(
+            [Visible(left), Visible(right)],
+            baseOptions with { OrderlinessWeight = 4.0 });
+
+        var weakGap = Math.Abs(TargetFor(weakPlan, right).Left - TargetFor(weakPlan, left).Right);
+        var strongGap = Math.Abs(TargetFor(strongPlan, right).Left - TargetFor(strongPlan, left).Right);
+
+        Assert.True(strongGap < weakGap);
+    }
+
+    [Fact]
+    public void ClassicMode_RemainsAvailableAsDeterministicFallback()
+    {
+        var left = Window(1, new RectI(200, 200, 500, 500), 0);
+        var right = Window(2, new RectI(740, 200, 500, 500), 1);
+        var options = new TidyOptions(
+            AlgorithmMode: TidyAlgorithmMode.Classic,
+            NeighborSnapDistance: 50,
+            AlignmentSnapDistance: 0,
+            ScreenSnapDistance: 0,
+            MaximumEdgeAdjustment: 200,
+            RescueOffscreenWindows: false,
+            Passes: 1);
+
+        var plan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], options);
+
+        Assert.Equal(TargetFor(plan, left).Right, TargetFor(plan, right).Left);
     }
 
     private static WindowSnapshot Window(
