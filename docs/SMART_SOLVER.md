@@ -56,6 +56,17 @@ right_i = workArea.right
 ...
 ```
 
+### Size preservation
+
+For a resizable window, Smart can separately resist changing its width and height:
+
+```text
+right_i - left_i = original_width_i
+bottom_i - top_i = original_height_i
+```
+
+This separates two ideas that a simple maximum-resize percentage cannot express: the **preference** to solve a relationship by translating a window instead of resizing it, and the **hard upper bound** on how much resizing is allowed at all.
+
 ### Confidence
 
 Relationship confidence decays smoothly with distance using a Gaussian kernel:
@@ -75,15 +86,19 @@ Conceptually Smart minimizes a quadratic energy of the form:
 ```text
 E =
     W_preserve * Σ importance_i * ||x_i - x_i^0||²
+  + W_resize   * Σ importance_i * size_error_i²
   + W_order    * Σ confidence_k * relation_error_k²
   + W_screen   * Σ confidence_s * screen_anchor_error_s²
 ```
+
+where `size_error_i` represents the deviation from the original width and height for a resizable window.
 
 The current implementation does not depend on a heavyweight general-purpose QP package. Because the inferred graph is sparse and the intended correction is local, it approximates the weighted least-squares solution with damped Jacobi relaxation.
 
 Each edge receives proposals from:
 
 - its original baseline position;
+- the opposite edge of the same window when size preservation is enabled;
 - related edges of neighboring windows; and
 - an optional screen anchor.
 
@@ -109,9 +124,10 @@ Smart mode solves all inferred relationships together. A three-window arrangemen
 
 ## 6. User-facing weights
 
-NeatWin exposes three high-level weights rather than every internal coefficient:
+NeatWin exposes four high-level weights rather than every internal coefficient:
 
 - **Preserve layout**: resistance to moving away from the observed arrangement.
+- **Resize resistance**: resistance to changing width/height; higher values prefer translating the whole window when possible.
 - **Orderliness**: strength of inferred neighbor/alignment relationships.
 - **Screen usage**: strength of inferred monitor-edge anchors.
 
