@@ -1,3 +1,5 @@
+using NeatWin.Core;
+
 namespace NeatWin.App;
 
 internal sealed class MainWindow : Form
@@ -9,32 +11,31 @@ internal sealed class MainWindow : Form
     private readonly CheckBox _shiftBox;
     private readonly CheckBox _winBox;
     private readonly ComboBox _keyBox;
+    private readonly TidyOptionsEditor _tidyOptionsEditor;
     private bool _allowClose;
 
-    internal MainWindow(HotkeyBinding initialBinding)
+    internal MainWindow(HotkeyBinding initialBinding, TidyOptions initialOptions)
     {
         Text = "NeatWin";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(520, 390);
+        ClientSize = new Size(600, 520);
         Font = new Font("Segoe UI", 9F);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(20),
+            Padding = new Padding(18),
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 5,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 142));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         Controls.Add(root);
 
         var header = new Panel { Dock = DockStyle.Fill };
@@ -50,7 +51,7 @@ internal sealed class MainWindow : Form
             AutoSize = true,
             Text = "● 正在运行",
             ForeColor = Color.ForestGreen,
-            Location = new Point(0, 29),
+            Location = new Point(0, 28),
         };
         header.Controls.Add(title);
         header.Controls.Add(runningLabel);
@@ -61,7 +62,7 @@ internal sealed class MainWindow : Form
             Dock = DockStyle.Fill,
             Text = "整理当前可见窗口",
             Font = new Font(Font.FontFamily, 12F, FontStyle.Bold),
-            Margin = new Padding(0, 4, 0, 8),
+            Margin = new Padding(0, 2, 0, 6),
         };
         tidyButton.Click += (_, _) => TidyRequested?.Invoke(this, EventArgs.Empty);
         root.Controls.Add(tidyButton, 0, 1);
@@ -74,13 +75,105 @@ internal sealed class MainWindow : Form
         };
         root.Controls.Add(_activityLabel, 0, 2);
 
-        var hotkeyGroup = new GroupBox
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        root.Controls.Add(tabs, 0, 3);
+
+        var hotkeyTab = new TabPage("快捷键") { Padding = new Padding(10) };
+        tabs.TabPages.Add(hotkeyTab);
+        BuildHotkeyTab(hotkeyTab, initialBinding);
+
+        var algorithmTab = new TabPage("算法参数") { Padding = new Padding(4) };
+        tabs.TabPages.Add(algorithmTab);
+        _tidyOptionsEditor = new TidyOptionsEditor(initialOptions);
+        _tidyOptionsEditor.OptionsChangeRequested += (_, eventArgs) =>
+            TidyOptionsChangeRequested?.Invoke(this, eventArgs);
+        algorithmTab.Controls.Add(_tidyOptionsEditor);
+
+        var bottom = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+        };
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var hint = new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "关闭窗口后仍驻留托盘；双击托盘图标可重新打开。",
+            ForeColor = SystemColors.GrayText,
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+        bottom.Controls.Add(hint, 0, 0);
+
+        var exitButton = new Button
+        {
+            Text = "退出 NeatWin",
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+        };
+        exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
+        bottom.Controls.Add(exitButton, 1, 0);
+        root.Controls.Add(bottom, 0, 4);
+
+        SetHotkeyControls(initialBinding);
+        FormClosing += OnFormClosing;
+    }
+
+    internal event EventHandler? TidyRequested;
+    internal event EventHandler<HotkeyChangeEventArgs>? HotkeyChangeRequested;
+    internal event EventHandler<TidyOptionsChangeEventArgs>? TidyOptionsChangeRequested;
+    internal event EventHandler? ExitRequested;
+
+    internal void SetActivity(string message, bool error = false)
+    {
+        _activityLabel.Text = message;
+        _activityLabel.ForeColor = error ? Color.Firebrick : SystemColors.ControlText;
+    }
+
+    internal void SetHotkeyRegistration(HotkeyBinding activeBinding, bool success, string message)
+    {
+        SetHotkeyControls(activeBinding);
+        _hotkeyStatusLabel.Text = message;
+        _hotkeyStatusLabel.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
+    }
+
+    internal void SetTidyOptionsStatus(TidyOptions activeOptions, bool success, string message) =>
+        _tidyOptionsEditor.SetStatus(activeOptions, success, message);
+
+    internal void BringToFrontFromTray()
+    {
+        if (!Visible)
+        {
+            Show();
+        }
+
+        if (WindowState == FormWindowState.Minimized)
+        {
+            WindowState = FormWindowState.Normal;
+        }
+
+        Activate();
+        BringToFront();
+    }
+
+    internal void AllowCloseAndClose()
+    {
+        _allowClose = true;
+        Close();
+    }
+
+    private void BuildHotkeyTab(TabPage tab, HotkeyBinding initialBinding)
+    {
+        var hotkeyGroup = new GroupBox
+        {
+            Dock = DockStyle.Top,
+            Height = 145,
             Text = "全局快捷键",
             Padding = new Padding(12),
         };
-        root.Controls.Add(hotkeyGroup, 0, 3);
+        tab.Controls.Add(hotkeyGroup);
 
         var hotkeyLayout = new TableLayoutPanel
         {
@@ -136,72 +229,6 @@ internal sealed class MainWindow : Form
         };
         hotkeyLayout.SetColumnSpan(_hotkeyStatusLabel, 6);
         hotkeyLayout.Controls.Add(_hotkeyStatusLabel, 0, 1);
-
-        var hint = new Label
-        {
-            Dock = DockStyle.Fill,
-            Text = "窗口关闭后 NeatWin 会留在系统托盘；双击托盘图标可重新打开。",
-            ForeColor = SystemColors.GrayText,
-            TextAlign = ContentAlignment.MiddleLeft,
-        };
-        root.Controls.Add(hint, 0, 4);
-
-        var bottom = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false,
-        };
-        var exitButton = new Button
-        {
-            Text = "退出 NeatWin",
-            AutoSize = true,
-        };
-        exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
-        bottom.Controls.Add(exitButton);
-        root.Controls.Add(bottom, 0, 6);
-
-        SetHotkeyControls(initialBinding);
-        FormClosing += OnFormClosing;
-    }
-
-    internal event EventHandler? TidyRequested;
-    internal event EventHandler<HotkeyChangeEventArgs>? HotkeyChangeRequested;
-    internal event EventHandler? ExitRequested;
-
-    internal void SetActivity(string message, bool error = false)
-    {
-        _activityLabel.Text = message;
-        _activityLabel.ForeColor = error ? Color.Firebrick : SystemColors.ControlText;
-    }
-
-    internal void SetHotkeyRegistration(HotkeyBinding activeBinding, bool success, string message)
-    {
-        SetHotkeyControls(activeBinding);
-        _hotkeyStatusLabel.Text = message;
-        _hotkeyStatusLabel.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
-    }
-
-    internal void BringToFrontFromTray()
-    {
-        if (!Visible)
-        {
-            Show();
-        }
-
-        if (WindowState == FormWindowState.Minimized)
-        {
-            WindowState = FormWindowState.Normal;
-        }
-
-        Activate();
-        BringToFront();
-    }
-
-    internal void AllowCloseAndClose()
-    {
-        _allowClose = true;
-        Close();
     }
 
     private void ApplyHotkeyFromControls()
