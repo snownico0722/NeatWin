@@ -181,6 +181,7 @@ public sealed class CoreBehaviorTests
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
         var right = Window(2, new RectI(740, 200, 500, 500), 1);
         var conservative = new TidyOptions(
+            ResizeResistanceWeight: 0,
             NeighborSnapDistance: 20,
             AlignmentSnapDistance: 0,
             ScreenSnapDistance: 0,
