@@ -75,7 +75,7 @@ Relationship confidence decays smoothly with distance using a Gaussian kernel:
 c(d) = exp(-0.5 * (d / sigma)^2)
 ```
 
-This avoids a purely binary interpretation where 71 px means "same relationship" but 73 px means "completely unrelated".
+This avoids a purely binary interpretation where one nearby distance is treated as related and a slightly larger one as completely unrelated.
 
 Orthogonal overlap is multiplied into the confidence of neighbor relations, so two windows that barely touch vertically are much weaker horizontal-neighbor candidates than two windows sharing most of their height.
 
@@ -122,22 +122,30 @@ Classic mode performs a sequence of local rules. A later rule can partially undo
 
 Smart mode solves all inferred relationships together. A three-window arrangement such as one large window above two smaller windows naturally produces a small constraint graph with shared horizontal/vertical boundaries. Competing requests are resolved by weight rather than execution order.
 
-## 6. User-facing weights
+## 6. User-facing intent profiles
 
-NeatWin exposes four high-level weights rather than every internal coefficient:
+The mathematical parameters above are **implementation details**, not Smart-mode UI controls. Smart exposes only three compact intent axes, each with three levels:
 
-- **Preserve layout**: resistance to moving away from the observed arrangement.
-- **Resize resistance**: resistance to changing width/height; higher values prefer translating the whole window when possible.
-- **Orderliness**: strength of inferred neighbor/alignment relationships.
-- **Screen usage**: strength of inferred monitor-edge anchors.
+- **Tidy strength — Gentle / Balanced / Assertive**: controls how strongly the optimizer may depart from the observed arrangement overall.
+- **Hit tendency — Cautious / Balanced / Sensitive**: controls how readily nearby geometry is admitted into the relationship graph.
+- **Size tendency — Preserve size / Balanced / Expand usage**: controls the trade-off between translating whole windows and resizing them to make better use of nearby free space.
 
-The geometric inference radii remain separately configurable because they answer a different question: *which relationships are plausible enough to enter the optimization problem at all?*
+The default is Balanced on all three axes. A profile resolver maps these choices to calibrated internal weights, inference ranges, iteration counts and hard cosmetic budgets before `SmartTidySolver` runs.
+
+This separation is intentional:
+
+- Smart users describe **intent**, not solver coefficients.
+- Internal calibration can evolve without changing the public UI model.
+- Legacy/raw numeric values in settings cannot silently alter Smart behavior.
+- Classic remains the explicit expert/threshold mode for users who actually want direct pixel and percentage controls.
+
+Off-screen rescue is kept as a separate behavior switch because it is a correctness policy, not a cosmetic optimization preference.
 
 ## 7. Research lineage
 
 The solver is inspired by constrained graph-layout adjustment and rectangle-overlap-removal work where a layout is modified to satisfy separation constraints while staying close to the original placement. Relevant work includes Tim Dwyer, Kim Marriott and Peter J. Stuckey's fast node overlap removal / separation-constraint methods, as well as later stress-based overlap-removal methods.
 
-NeatWin is not a direct implementation of those papers. Desktop windows add different constraints: resizability, monitor work areas, focus, Z-order visibility, user-controlled size budgets and the requirement not to surface hidden background windows.
+NeatWin is not a direct implementation of those papers. Desktop windows add different constraints: resizability, monitor work areas, focus, Z-order visibility, size budgets and the requirement not to surface hidden background windows.
 
 ## 8. Planned extensions
 
