@@ -13,32 +13,33 @@ NeatWin has two solver modes:
 - **Smart · intelligent tidy** — the default. It infers a sparse graph of likely relationships between currently visible windows and solves those relationships together instead of applying one `if` rule after another.
 - **Classic · threshold rules** — the original deterministic fallback. It is retained for users who explicitly want direct pixel/percentage thresholds.
 
-Smart models each window edge as a geometric variable. Internally it builds weighted constraints for:
+Smart models each window edge as a geometric variable. Internally it builds weighted constraints for staying close to the original arrangement, resisting unnecessary resize, closing likely gaps/overlaps, aligning rows/columns and using nearby monitor boundaries. The active foreground window is preserved more strongly than a partly occluded visible window.
 
-- staying close to the original floating arrangement;
-- resisting width/height changes independently from position changes;
-- closing a likely small gap or small overlap between neighbors;
-- aligning near-matching edges in a row or column;
-- using nearby monitor work-area boundaries;
-- preserving the active foreground window more strongly than a partly occluded window.
-
-Constraint confidence decays smoothly with geometric distance rather than switching abruptly at a single threshold. The solver then performs damped weighted relaxation and projects every iteration back into hard usability limits such as resize budgets, minimum dimensions and monitor work areas.
+Constraint confidence decays smoothly with geometric distance rather than switching abruptly at a single threshold. The solver performs damped weighted relaxation and projects every iteration back into hard usability limits such as resize budgets, minimum dimensions and monitor work areas.
 
 The approach is conceptually related to constraint-based graph-layout adjustment and overlap-removal work such as Dwyer, Marriott and Stuckey's separation-constraint methods: preserve the original layout as much as possible while satisfying a small, high-confidence set of spatial relationships. NeatWin adds window-specific concerns such as visible-Z-order filtering, focus importance, resizability and monitor work areas.
 
 ### Simple Smart controls
 
-Smart deliberately does **not** expose its raw weights, inference radii, iteration count, movement budget or resize percentage in the GUI. Users express intent with only three three-level choices:
+Smart deliberately does **not** expose raw solver weights, inference radii, iteration counts or pixel budgets in the GUI. Users express intent with a small set of human-readable choices:
 
 - **Tidy strength: Gentle / Balanced / Assertive** — how much the solver is willing to change the current arrangement overall.
 - **Hit tendency: Cautious / Balanced / Sensitive** — how readily nearby windows are interpreted as belonging to the same alignment/adjacency structure.
 - **Size tendency: Preserve size / Balanced / Expand usage** — whether Smart should prefer moving whole windows or allow more resizing to use nearby free screen space.
+- **Overlap avoidance: Gentle / Balanced / Strong** — how deep an overlap must be before Smart actively separates the windows. Separation uses the lower-cost axis and moves the active/important window less.
+- **Prefer reversible vertical fill** — when a window is already a strong candidate to use the full work-area height, Smart prefers an exact top-to-bottom fill. NeatWin remembers the pre-tidy rectangle so a later title-bar drag can restore the previous size under the pointer.
 
-The default is **Balanced / Balanced / Balanced**. These choices map to internally calibrated solver parameters. Smart ignores legacy/raw Classic tuning values even if they remain in an older settings file.
+The default is Balanced for the three main tendencies and overlap avoidance, with reversible vertical fill enabled. Smart ignores legacy/raw Classic tuning values even if they remain in an older settings file.
 
 When **Classic** is selected, the GUI switches to explicit threshold controls such as neighbor distance, edge-alignment distance, screen-edge distance, movement limit, resize percentage and rule passes.
 
 Off-screen rescue remains a separate behavior switch in both modes. Settings are persisted in `%LOCALAPPDATA%\NeatWin\settings.json` and apply immediately.
+
+### About reversible vertical fill
+
+Windows treats a truly snapped window as a special arranged state with a separate restore rectangle. The public API that can directly apply an arranged state to a window is restricted and cannot be used by NeatWin to arrange arbitrary windows owned by other applications.
+
+NeatWin therefore reproduces the user-facing behavior without pretending to set Windows' private snap state: it uses exact work-area geometry, records the pre-tidy rectangle, listens for the system move/size-start event, and restores the previous size only when the user starts dragging from the title-bar region. Border resizing does not trigger the restore path.
 
 ## Visible working set
 
@@ -101,6 +102,10 @@ Weighted constraint system
         v
 Damped relaxation + projection
         |
+        v
+Smart behavior projection
+(vertical fill + overlap separation)
+        |
         +-------------+-------------+
                       |
                       v
@@ -133,7 +138,7 @@ dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj -c Release
 
 GitHub Actions builds and tests the project on `windows-latest` and publishes a framework-dependent x64 single-file artifact.
 
-The Smart V0 regression suite covers visibility filtering, off-screen recovery, exact local gap/overlap convergence, screen-edge anchors, Smart profile behavior, isolation from Classic raw thresholds, a three-window topology case, and Classic fallback.
+The Smart V0 regression suite covers visibility filtering, off-screen recovery, exact local gap/overlap convergence, screen-edge anchors, Smart profile behavior, overlap separation profiles, reversible vertical-fill geometry, isolation from Classic raw thresholds, a three-window topology case, and Classic fallback.
 
 ## Current limitations
 
@@ -143,5 +148,6 @@ V0 still has deliberate boundaries:
 - There is no movement animation yet; correctness and predictable geometry come first.
 - Smart inference is geometric rather than semantic: it does not know that one window is a browser and another is a chat client.
 - The first Smart solver uses a sparse weighted constraint graph and iterative relaxation rather than a full general-purpose QP package.
+- Reversible vertical-fill restoration uses a conservative title-bar hit heuristic because applications can implement custom non-client areas.
 - Native window minimum-track sizes are not queried yet; Windows may clamp a requested resize for apps with stricter limits.
 - Real multi-monitor, mixed-DPI and unusual application-window behavior still need broader desktop testing.
