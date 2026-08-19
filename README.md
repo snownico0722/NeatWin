@@ -39,7 +39,7 @@ Off-screen rescue remains a separate behavior switch in both modes. Settings are
 
 Windows treats a truly snapped window as a special arranged state with a separate restore rectangle. The public API that can directly apply an arranged state to a window is restricted and cannot be used by NeatWin to arrange arbitrary windows owned by other applications.
 
-NeatWin therefore reproduces the user-facing behavior without pretending to set Windows' private snap state: it uses exact work-area geometry, records the pre-tidy rectangle, listens for the system move/size-start event, and restores the previous size only when the user starts dragging from the title-bar region. Border resizing does not trigger the restore path.
+NeatWin therefore implements **Windows-like reversible fill**, not native Windows Arranged/Snap state: it uses exact work-area geometry, records the pre-tidy rectangle, listens for the system move/size-start event, and restores the previous size only when the user starts dragging from the title-bar region. Border resizing does not trigger the restore path.
 
 ## Visible working set
 
