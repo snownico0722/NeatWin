@@ -1,5 +1,7 @@
 # NeatWin
 
+> V0 prototype: conservative visible-window tidy, intentionally not a tiling window manager.
+
 NeatWin is a small Windows utility that **tidies the windows you are actually looking at** without replacing the normal floating-window desktop with a tiling window manager.
 
 Press **Win + Alt + T** and NeatWin makes conservative geometry corrections: nearby gaps and small overlaps are closed, almost-aligned edges are normalized, and windows already near the usable screen boundary can be expanded or nudged toward it.
