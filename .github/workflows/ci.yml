@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - agent/**
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore tests/NeatWin.Tests/NeatWin.Tests.csproj
+
+      - name: Test
+        run: dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj --configuration Release --no-restore
+
+      - name: Publish x64
+        run: >-
+          dotnet publish src/NeatWin/NeatWin.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained false
+          -p:PublishSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output artifacts/win-x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-win-x64
+          path: artifacts/win-x64/
