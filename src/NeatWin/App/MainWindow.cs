@@ -6,6 +6,7 @@ internal sealed class MainWindow : Form
 {
     private readonly Label _activityLabel;
     private readonly ComboBox _algorithmModeBox;
+    private readonly CheckBox _autoTidyBox;
     private Label _hotkeyStatusLabel = null!;
     private CheckBox _ctrlBox = null!;
     private CheckBox _altBox = null!;
@@ -14,12 +15,14 @@ internal sealed class MainWindow : Form
     private ComboBox _keyBox = null!;
     private readonly TidyOptionsEditor _tidyOptionsEditor;
     private bool _suppressAlgorithmModeChange;
+    private bool _suppressAutoTidyChange;
     private bool _allowClose;
 
     internal MainWindow(
         HotkeyBinding initialBinding,
         TidyOptions initialOptions,
-        SmartBehaviorOptions initialBehaviorOptions)
+        SmartBehaviorOptions initialBehaviorOptions,
+        bool autoTidyEnabled)
     {
         Text = "NeatWin";
         StartPosition = FormStartPosition.CenterScreen;
@@ -75,6 +78,15 @@ internal sealed class MainWindow : Form
         _algorithmModeBox.Items.Add(new AlgorithmModeOption(TidyAlgorithmMode.Smart, "Smart · 智能整理"));
         _algorithmModeBox.Items.Add(new AlgorithmModeOption(TidyAlgorithmMode.Classic, "Classic · 阈值规则"));
         modeHost.Controls.Add(_algorithmModeBox);
+
+        _autoTidyBox = new CheckBox
+        {
+            AutoSize = true,
+            Text = "自动",
+            Checked = autoTidyEnabled,
+            Margin = new Padding(14, 6, 0, 0),
+        };
+        modeHost.Controls.Add(_autoTidyBox);
         header.Controls.Add(modeHost, 1, 0);
         root.Controls.Add(header, 0, 0);
 
@@ -113,6 +125,7 @@ internal sealed class MainWindow : Form
         algorithmTab.Controls.Add(_tidyOptionsEditor);
 
         _algorithmModeBox.SelectedIndexChanged += OnAlgorithmModeChanged;
+        _autoTidyBox.CheckedChanged += OnAutoTidyChanged;
 
         var bottom = new FlowLayoutPanel
         {
@@ -136,6 +149,7 @@ internal sealed class MainWindow : Form
     internal event EventHandler? TidyRequested;
     internal event EventHandler<HotkeyChangeEventArgs>? HotkeyChangeRequested;
     internal event EventHandler<TidyOptionsChangeEventArgs>? TidyOptionsChangeRequested;
+    internal event EventHandler<AutoTidyChangeEventArgs>? AutoTidyChangeRequested;
     internal event EventHandler? ExitRequested;
 
     internal void SetActivity(string message, bool error = false)
@@ -159,6 +173,19 @@ internal sealed class MainWindow : Form
     {
         _tidyOptionsEditor.SetStatus(activeOptions, activeBehaviorOptions, success, message);
         SelectAlgorithmMode(activeOptions.AlgorithmMode);
+    }
+
+    internal void SetAutoTidyEnabled(bool enabled)
+    {
+        _suppressAutoTidyChange = true;
+        try
+        {
+            _autoTidyBox.Checked = enabled;
+        }
+        finally
+        {
+            _suppressAutoTidyChange = false;
+        }
     }
 
     internal void BringToFrontFromTray()
@@ -192,6 +219,18 @@ internal sealed class MainWindow : Form
         }
 
         _tidyOptionsEditor.ChangeAlgorithmMode(option.Mode);
+    }
+
+    private void OnAutoTidyChanged(object? sender, EventArgs eventArgs)
+    {
+        if (_suppressAutoTidyChange)
+        {
+            return;
+        }
+
+        AutoTidyChangeRequested?.Invoke(
+            this,
+            new AutoTidyChangeEventArgs(_autoTidyBox.Checked));
     }
 
     private void SelectAlgorithmMode(TidyAlgorithmMode mode)
@@ -381,4 +420,9 @@ internal sealed class MainWindow : Form
 internal sealed class HotkeyChangeEventArgs(HotkeyBinding binding) : EventArgs
 {
     internal HotkeyBinding Binding { get; } = binding;
+}
+
+internal sealed class AutoTidyChangeEventArgs(bool enabled) : EventArgs
+{
+    internal bool Enabled { get; } = enabled;
 }
