@@ -35,13 +35,17 @@ internal sealed class SettingsStore
     {
         var stored = LoadStoredSettings();
         var defaults = new TidyOptions();
-        var mode = stored.AlgorithmMode is int rawMode && Enum.IsDefined(typeof(TidyAlgorithmMode), rawMode)
-            ? (TidyAlgorithmMode)rawMode
-            : defaults.AlgorithmMode;
 
         return defaults with
         {
-            AlgorithmMode = mode,
+            AlgorithmMode = ReadEnum(stored.AlgorithmMode, defaults.AlgorithmMode),
+            SmartStrength = ReadEnum(stored.SmartStrength, defaults.SmartStrength),
+            SmartHitTendency = ReadEnum(stored.SmartHitTendency, defaults.SmartHitTendency),
+            SmartSizeTendency = ReadEnum(stored.SmartSizeTendency, defaults.SmartSizeTendency),
+
+            // Raw solver fields are retained for Classic mode and for backward-compatible
+            // settings files. Smart mode derives its internal values from the three intent
+            // profiles above instead of exposing these numbers to the user.
             PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
             ResizeResistanceWeight = Math.Clamp(stored.ResizeResistanceWeight ?? defaults.ResizeResistanceWeight, 0.0, 5.0),
             OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
@@ -72,6 +76,10 @@ internal sealed class SettingsStore
     {
         var settings = LoadStoredSettings();
         settings.AlgorithmMode = (int)options.AlgorithmMode;
+        settings.SmartStrength = (int)options.SmartStrength;
+        settings.SmartHitTendency = (int)options.SmartHitTendency;
+        settings.SmartSizeTendency = (int)options.SmartSizeTendency;
+
         settings.PreserveLayoutWeight = options.PreserveLayoutWeight;
         settings.ResizeResistanceWeight = options.ResizeResistanceWeight;
         settings.OrderlinessWeight = options.OrderlinessWeight;
@@ -117,6 +125,14 @@ internal sealed class SettingsStore
         File.WriteAllText(_settingsPath, json);
     }
 
+    private static TEnum ReadEnum<TEnum>(int? raw, TEnum fallback)
+        where TEnum : struct, Enum
+    {
+        return raw is int value && Enum.IsDefined(typeof(TEnum), value)
+            ? (TEnum)Enum.ToObject(typeof(TEnum), value)
+            : fallback;
+    }
+
     private sealed class StoredSettings
     {
         public int Key { get; set; }
@@ -126,6 +142,10 @@ internal sealed class SettingsStore
         public bool Win { get; set; }
 
         public int? AlgorithmMode { get; set; }
+        public int? SmartStrength { get; set; }
+        public int? SmartHitTendency { get; set; }
+        public int? SmartSizeTendency { get; set; }
+
         public double? PreserveLayoutWeight { get; set; }
         public double? ResizeResistanceWeight { get; set; }
         public double? OrderlinessWeight { get; set; }
