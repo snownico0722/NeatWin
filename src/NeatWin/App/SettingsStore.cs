@@ -44,8 +44,7 @@ internal sealed class SettingsStore
             SmartSizeTendency = ReadEnum(stored.SmartSizeTendency, defaults.SmartSizeTendency),
 
             // Raw solver fields are retained for Classic mode and for backward-compatible
-            // settings files. Smart mode derives its internal values from the three intent
-            // profiles above instead of exposing these numbers to the user.
+            // settings files. Smart mode derives its internal values from the intent profiles.
             PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
             ResizeResistanceWeight = Math.Clamp(stored.ResizeResistanceWeight ?? defaults.ResizeResistanceWeight, 0.0, 5.0),
             OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
@@ -58,6 +57,17 @@ internal sealed class SettingsStore
             MaximumSizeChangeRatio = Math.Clamp(stored.MaximumSizeChangeRatio ?? defaults.MaximumSizeChangeRatio, 0, 0.50),
             RescueOffscreenWindows = stored.RescueOffscreenWindows ?? defaults.RescueOffscreenWindows,
             Passes = Math.Clamp(stored.Passes ?? defaults.Passes, 1, 5),
+        };
+    }
+
+    internal SmartBehaviorOptions LoadSmartBehaviorOptions()
+    {
+        var stored = LoadStoredSettings();
+        var defaults = new SmartBehaviorOptions();
+        return defaults with
+        {
+            PreferReversibleVerticalFill = stored.PreferReversibleVerticalFill ?? defaults.PreferReversibleVerticalFill,
+            OverlapAvoidance = ReadEnum(stored.SmartOverlapAvoidance, defaults.OverlapAvoidance),
         };
     }
 
@@ -92,6 +102,14 @@ internal sealed class SettingsStore
         settings.MaximumSizeChangeRatio = options.MaximumSizeChangeRatio;
         settings.RescueOffscreenWindows = options.RescueOffscreenWindows;
         settings.Passes = options.Passes;
+        WriteStoredSettings(settings);
+    }
+
+    internal void SaveSmartBehaviorOptions(SmartBehaviorOptions options)
+    {
+        var settings = LoadStoredSettings();
+        settings.PreferReversibleVerticalFill = options.PreferReversibleVerticalFill;
+        settings.SmartOverlapAvoidance = (int)options.OverlapAvoidance;
         WriteStoredSettings(settings);
     }
 
@@ -145,6 +163,8 @@ internal sealed class SettingsStore
         public int? SmartStrength { get; set; }
         public int? SmartHitTendency { get; set; }
         public int? SmartSizeTendency { get; set; }
+        public int? SmartOverlapAvoidance { get; set; }
+        public bool? PreferReversibleVerticalFill { get; set; }
 
         public double? PreserveLayoutWeight { get; set; }
         public double? ResizeResistanceWeight { get; set; }
