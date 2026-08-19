@@ -5,12 +5,12 @@ namespace NeatWin.App;
 internal sealed class MainWindow : Form
 {
     private readonly Label _activityLabel;
-    private readonly Label _hotkeyStatusLabel;
-    private readonly CheckBox _ctrlBox;
-    private readonly CheckBox _altBox;
-    private readonly CheckBox _shiftBox;
-    private readonly CheckBox _winBox;
-    private readonly ComboBox _keyBox;
+    private Label _hotkeyStatusLabel = null!;
+    private CheckBox _ctrlBox = null!;
+    private CheckBox _altBox = null!;
+    private CheckBox _shiftBox = null!;
+    private CheckBox _winBox = null!;
+    private ComboBox _keyBox = null!;
     private readonly TidyOptionsEditor _tidyOptionsEditor;
     private bool _allowClose;
 
