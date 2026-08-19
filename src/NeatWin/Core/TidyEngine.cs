@@ -6,6 +6,7 @@ public sealed record TidyOptions(
     int ScreenSnapDistance = 96,
     int MaximumEdgeAdjustment = 96,
     double MaximumSizeChangeRatio = 0.12,
+    bool RescueOffscreenWindows = true,
     int MinimumWidth = 320,
     int MinimumHeight = 220,
     double MinimumNeighborOverlapRatio = 0.30,
@@ -31,6 +32,11 @@ public sealed class TidyEngine
                 continue;
             }
 
+            if (options.RescueOffscreenWindows)
+            {
+                RescueOffscreenWindows(working);
+            }
+
             for (var pass = 0; pass < Math.Max(1, options.Passes); pass++)
             {
                 SnapNearScreenEdges(working, options);
@@ -41,6 +47,14 @@ public sealed class TidyEngine
             foreach (var item in working)
             {
                 var target = ClampToBudget(item.Snapshot, item.Current, options);
+                if (options.RescueOffscreenWindows)
+                {
+                    // Off-screen recovery is a correctness constraint, not a cosmetic tweak.
+                    // It is deliberately allowed to exceed MaximumEdgeAdjustment so a window
+                    // cannot remain stranded outside the usable monitor work area.
+                    target = FitInsideWorkArea(item.Snapshot, target);
+                }
+
                 if (HasMeaningfulChange(item.Original, target))
                 {
                     result.Add(new TidyMove(item.Snapshot, target));
@@ -49,6 +63,44 @@ public sealed class TidyEngine
         }
 
         return result;
+    }
+
+    private static void RescueOffscreenWindows(List<WorkingWindow> windows)
+    {
+        foreach (var window in windows)
+        {
+            window.SetRect(FitInsideWorkArea(window.Snapshot, window.Current));
+        }
+    }
+
+    private static RectI FitInsideWorkArea(WindowSnapshot snapshot, RectI rect)
+    {
+        var workArea = snapshot.WorkArea;
+        if (workArea.IsEmpty || rect.IsEmpty)
+        {
+            return rect;
+        }
+
+        var width = rect.Width;
+        var height = rect.Height;
+
+        // Resizable windows that are larger than the usable screen are shrunk just enough
+        // to fit. Fixed-size windows keep their dimensions and are anchored so their
+        // top-left remains usable, because Windows cannot honor a forced resize for them.
+        if (snapshot.IsResizable)
+        {
+            width = Math.Min(width, workArea.Width);
+            height = Math.Min(height, workArea.Height);
+        }
+
+        var left = width <= workArea.Width
+            ? Math.Clamp(rect.Left, workArea.Left, workArea.Right - width)
+            : workArea.Left;
+        var top = height <= workArea.Height
+            ? Math.Clamp(rect.Top, workArea.Top, workArea.Bottom - height)
+            : workArea.Top;
+
+        return new RectI(left, top, width, height);
     }
 
     private static void SnapNearScreenEdges(List<WorkingWindow> windows, TidyOptions options)
@@ -202,12 +254,13 @@ public sealed class TidyEngine
         var top = Math.Clamp(proposed.Top, original.Top - maxEdge, original.Top + maxEdge);
         var bottom = Math.Clamp(proposed.Bottom, original.Bottom - maxEdge, original.Bottom + maxEdge);
 
+        var resizeRatio = Math.Clamp(options.MaximumSizeChangeRatio, 0, 1);
         var minWidthFloor = Math.Min(original.Width, options.MinimumWidth);
         var minHeightFloor = Math.Min(original.Height, options.MinimumHeight);
-        var minWidth = Math.Max(minWidthFloor, (int)Math.Floor(original.Width * (1 - options.MaximumSizeChangeRatio)));
-        var maxWidth = Math.Max(minWidth, (int)Math.Ceiling(original.Width * (1 + options.MaximumSizeChangeRatio)));
-        var minHeight = Math.Max(minHeightFloor, (int)Math.Floor(original.Height * (1 - options.MaximumSizeChangeRatio)));
-        var maxHeight = Math.Max(minHeight, (int)Math.Ceiling(original.Height * (1 + options.MaximumSizeChangeRatio)));
+        var minWidth = Math.Max(minWidthFloor, (int)Math.Floor(original.Width * (1 - resizeRatio)));
+        var maxWidth = Math.Max(minWidth, (int)Math.Ceiling(original.Width * (1 + resizeRatio)));
+        var minHeight = Math.Max(minHeightFloor, (int)Math.Floor(original.Height * (1 - resizeRatio)));
+        var maxHeight = Math.Max(minHeight, (int)Math.Ceiling(original.Height * (1 + resizeRatio)));
 
         var width = Math.Clamp(Math.Max(1, right - left), minWidth, maxWidth);
         var height = Math.Clamp(Math.Max(1, bottom - top), minHeight, maxHeight);
@@ -262,6 +315,14 @@ public sealed class TidyEngine
         public int Right => _right;
         public int Bottom => _bottom;
         public RectI Current => RectI.FromEdges(_left, _top, _right, _bottom);
+
+        public void SetRect(RectI rect)
+        {
+            _left = rect.Left;
+            _top = rect.Top;
+            _right = rect.Right;
+            _bottom = rect.Bottom;
+        }
 
         public void TranslateX(int delta)
         {
