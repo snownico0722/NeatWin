@@ -9,6 +9,8 @@ internal sealed class TidyOptionsEditor : UserControl
     private readonly ComboBox _smartStrength;
     private readonly ComboBox _smartHitTendency;
     private readonly ComboBox _smartSizeTendency;
+    private readonly ComboBox _smartOverlapAvoidance;
+    private readonly CheckBox _preferReversibleVerticalFill;
     private readonly GroupBox _classicGroup;
     private readonly NumericUpDown _neighborSnap;
     private readonly NumericUpDown _alignmentSnap;
@@ -19,10 +21,12 @@ internal sealed class TidyOptionsEditor : UserControl
     private readonly CheckBox _rescueOffscreen;
     private readonly Label _statusLabel;
     private TidyOptions _currentOptions;
+    private SmartBehaviorOptions _currentBehaviorOptions;
 
-    internal TidyOptionsEditor(TidyOptions initialOptions)
+    internal TidyOptionsEditor(TidyOptions initialOptions, SmartBehaviorOptions initialBehaviorOptions)
     {
         _currentOptions = initialOptions;
+        _currentBehaviorOptions = initialBehaviorOptions;
         Dock = DockStyle.Fill;
         Padding = new Padding(8);
         AutoScroll = true;
@@ -81,15 +85,16 @@ internal sealed class TidyOptionsEditor : UserControl
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 3,
-            RowCount = 3,
+            RowCount = 5,
         };
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
-        for (var row = 0; row < 3; row++)
+        for (var row = 0; row < 4; row++)
         {
             smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         }
+        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _smartGroup.Controls.Add(smartLayout);
 
         _smartStrength = AddChoiceRow(
@@ -118,6 +123,24 @@ internal sealed class TidyOptionsEditor : UserControl
             new ChoiceOption<SmartSizeTendency>(SmartSizeTendency.Preserve, "保持尺寸"),
             new ChoiceOption<SmartSizeTendency>(SmartSizeTendency.Balanced, "平衡"),
             new ChoiceOption<SmartSizeTendency>(SmartSizeTendency.Expand, "扩大利用"));
+
+        _smartOverlapAvoidance = AddChoiceRow(
+            smartLayout,
+            3,
+            "避免重叠",
+            "决定多深的窗口重叠也要主动分开",
+            new ChoiceOption<SmartOverlapAvoidance>(SmartOverlapAvoidance.Gentle, "轻度"),
+            new ChoiceOption<SmartOverlapAvoidance>(SmartOverlapAvoidance.Balanced, "平衡"),
+            new ChoiceOption<SmartOverlapAvoidance>(SmartOverlapAvoidance.Strong, "强力"));
+
+        _preferReversibleVerticalFill = new CheckBox
+        {
+            AutoSize = true,
+            Text = "优先可逆纵向填满：合适时填满上下，拖标题栏可恢复整理前尺寸",
+            Anchor = AnchorStyles.Left,
+        };
+        smartLayout.SetColumnSpan(_preferReversibleVerticalFill, 3);
+        smartLayout.Controls.Add(_preferReversibleVerticalFill, 0, 4);
 
         _classicGroup = new GroupBox
         {
@@ -171,7 +194,7 @@ internal sealed class TidyOptionsEditor : UserControl
         var apply = new Button { Text = "保存并应用", AutoSize = true };
         apply.Click += (_, _) => ApplyFromControls();
         var reset = new Button { Text = "恢复默认", AutoSize = true };
-        reset.Click += (_, _) => SetControls(new TidyOptions());
+        reset.Click += (_, _) => SetControls(new TidyOptions(), new SmartBehaviorOptions());
         buttons.Controls.Add(apply);
         buttons.Controls.Add(reset);
         root.SetColumnSpan(buttons, 3);
@@ -187,15 +210,20 @@ internal sealed class TidyOptionsEditor : UserControl
         root.SetColumnSpan(_statusLabel, 3);
         root.Controls.Add(_statusLabel, 0, 5);
 
-        SetControls(initialOptions);
+        SetControls(initialOptions, initialBehaviorOptions);
     }
 
     internal event EventHandler<TidyOptionsChangeEventArgs>? OptionsChangeRequested;
 
-    internal void SetStatus(TidyOptions activeOptions, bool success, string message)
+    internal void SetStatus(
+        TidyOptions activeOptions,
+        SmartBehaviorOptions activeBehaviorOptions,
+        bool success,
+        string message)
     {
         _currentOptions = activeOptions;
-        SetControls(activeOptions);
+        _currentBehaviorOptions = activeBehaviorOptions;
+        SetControls(activeOptions, activeBehaviorOptions);
         _statusLabel.Text = message;
         _statusLabel.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
     }
@@ -211,6 +239,7 @@ internal sealed class TidyOptionsEditor : UserControl
             AlgorithmMode = mode,
             RescueOffscreenWindows = _rescueOffscreen.Checked,
         };
+        var behaviorOptions = _currentBehaviorOptions;
 
         if (mode == TidyAlgorithmMode.Smart)
         {
@@ -219,6 +248,11 @@ internal sealed class TidyOptionsEditor : UserControl
                 SmartStrength = SelectedValue(_smartStrength, SmartTidyStrength.Balanced),
                 SmartHitTendency = SelectedValue(_smartHitTendency, SmartHitTendency.Balanced),
                 SmartSizeTendency = SelectedValue(_smartSizeTendency, SmartSizeTendency.Balanced),
+            };
+            behaviorOptions = behaviorOptions with
+            {
+                OverlapAvoidance = SelectedValue(_smartOverlapAvoidance, SmartOverlapAvoidance.Balanced),
+                PreferReversibleVerticalFill = _preferReversibleVerticalFill.Checked,
             };
         }
         else
@@ -234,15 +268,17 @@ internal sealed class TidyOptionsEditor : UserControl
             };
         }
 
-        OptionsChangeRequested?.Invoke(this, new TidyOptionsChangeEventArgs(options));
+        OptionsChangeRequested?.Invoke(this, new TidyOptionsChangeEventArgs(options, behaviorOptions));
     }
 
-    private void SetControls(TidyOptions options)
+    private void SetControls(TidyOptions options, SmartBehaviorOptions behaviorOptions)
     {
         SelectAlgorithmMode(options.AlgorithmMode);
         SelectChoice(_smartStrength, options.SmartStrength);
         SelectChoice(_smartHitTendency, options.SmartHitTendency);
         SelectChoice(_smartSizeTendency, options.SmartSizeTendency);
+        SelectChoice(_smartOverlapAvoidance, behaviorOptions.OverlapAvoidance);
+        _preferReversibleVerticalFill.Checked = behaviorOptions.PreferReversibleVerticalFill;
 
         _neighborSnap.Value = ClampToDecimal(options.NeighborSnapDistance, _neighborSnap.Minimum, _neighborSnap.Maximum);
         _alignmentSnap.Value = ClampToDecimal(options.AlignmentSnapDistance, _alignmentSnap.Minimum, _alignmentSnap.Maximum);
@@ -389,7 +425,10 @@ internal sealed class TidyOptionsEditor : UserControl
     }
 }
 
-internal sealed class TidyOptionsChangeEventArgs(TidyOptions options) : EventArgs
+internal sealed class TidyOptionsChangeEventArgs(
+    TidyOptions options,
+    SmartBehaviorOptions behaviorOptions) : EventArgs
 {
     internal TidyOptions Options { get; } = options;
+    internal SmartBehaviorOptions BehaviorOptions { get; } = behaviorOptions;
 }
