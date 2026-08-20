@@ -13,6 +13,9 @@ public enum SmartTidyStrength
     Assertive,
 }
 
+// Legacy Smart knobs are intentionally retained in the settings model so older settings files and
+// callers remain compatible. Smart no longer resolves behavior from these fields; one coherent
+// SmartStrength profile controls relation reach, resize willingness, screen anchoring and movement.
 public enum SmartHitTendency
 {
     Cautious,
@@ -63,78 +66,51 @@ public sealed class TidyEngine
 
     private static TidyOptions ResolveSmartProfile(TidyOptions options)
     {
-        var resolved = options;
-
-        resolved = options.SmartStrength switch
+        // Smart is intentionally one coordinated temperament rather than several independent
+        // sliders. The profile changes all internal parameters together, and screen usage remains a
+        // weak cosmetic preference instead of a goal to maximize window area.
+        return options.SmartStrength switch
         {
-            SmartTidyStrength.Gentle => resolved with
+            SmartTidyStrength.Gentle => options with
             {
-                PreserveLayoutWeight = 1.50,
+                PreserveLayoutWeight = 1.45,
+                ResizeResistanceWeight = 0.45,
                 OrderlinessWeight = 1.30,
+                SpaceUsageWeight = 0.30,
                 SmartIterations = 28,
+                NeighborSnapDistance = 56,
+                AlignmentSnapDistance = 18,
+                ScreenSnapDistance = 56,
                 MaximumEdgeAdjustment = 64,
+                MaximumSizeChangeRatio = 0.08,
             },
-            SmartTidyStrength.Assertive => resolved with
+            SmartTidyStrength.Assertive => options with
             {
-                PreserveLayoutWeight = 0.70,
-                OrderlinessWeight = 2.50,
-                SmartIterations = 52,
-                MaximumEdgeAdjustment = 144,
-            },
-            _ => resolved with
-            {
-                PreserveLayoutWeight = 1.00,
-                OrderlinessWeight = 1.80,
-                SmartIterations = 36,
-                MaximumEdgeAdjustment = 96,
-            },
-        };
-
-        resolved = options.SmartHitTendency switch
-        {
-            SmartHitTendency.Cautious => resolved with
-            {
-                NeighborSnapDistance = 48,
-                AlignmentSnapDistance = 16,
-                ScreenSnapDistance = 64,
-            },
-            SmartHitTendency.Sensitive => resolved with
-            {
-                NeighborSnapDistance = 112,
-                AlignmentSnapDistance = 36,
-                ScreenSnapDistance = 144,
-            },
-            _ => resolved with
-            {
-                NeighborSnapDistance = 72,
-                AlignmentSnapDistance = 24,
+                PreserveLayoutWeight = 0.78,
+                ResizeResistanceWeight = 0.16,
+                OrderlinessWeight = 2.25,
+                SpaceUsageWeight = 0.55,
+                SmartIterations = 48,
+                NeighborSnapDistance = 104,
+                AlignmentSnapDistance = 32,
                 ScreenSnapDistance = 96,
-            },
-        };
-
-        resolved = options.SmartSizeTendency switch
-        {
-            SmartSizeTendency.Preserve => resolved with
-            {
-                ResizeResistanceWeight = 3.00,
-                SpaceUsageWeight = 0.70,
-                MaximumSizeChangeRatio = 0.06,
-            },
-            SmartSizeTendency.Expand => resolved with
-            {
-                ResizeResistanceWeight = 0.02,
-                SpaceUsageWeight = 1.60,
+                MaximumEdgeAdjustment = 144,
                 MaximumSizeChangeRatio = 0.20,
             },
-            _ => resolved with
+            _ => options with
             {
-                ResizeResistanceWeight = 0.10,
-                SpaceUsageWeight = 1.00,
-                MaximumSizeChangeRatio = 0.12,
+                PreserveLayoutWeight = 1.00,
+                ResizeResistanceWeight = 0.28,
+                OrderlinessWeight = 1.75,
+                SpaceUsageWeight = 0.42,
+                SmartIterations = 36,
+                NeighborSnapDistance = 76,
+                AlignmentSnapDistance = 24,
+                ScreenSnapDistance = 72,
+                MaximumEdgeAdjustment = 104,
+                MaximumSizeChangeRatio = 0.14,
             },
         };
-
-        return resolved;
     }
 
     private static IReadOnlyList<TidyMove> CreateClassicPlan(
