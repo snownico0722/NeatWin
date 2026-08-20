@@ -70,6 +70,8 @@ internal sealed class SettingsStore
         {
             PreferReversibleVerticalFill = stored.PreferReversibleVerticalFill ?? defaults.PreferReversibleVerticalFill,
             OverlapAvoidance = ReadEnum(stored.SmartOverlapAvoidance, defaults.OverlapAvoidance),
+            RemoveVideoBlackBars = stored.RemoveVideoBlackBars ?? defaults.RemoveVideoBlackBars,
+            VideoBlackBarTendency = ReadEnum(stored.VideoBlackBarTendency, defaults.VideoBlackBarTendency),
         };
     }
 
@@ -119,6 +121,8 @@ internal sealed class SettingsStore
         var settings = LoadStoredSettings();
         settings.PreferReversibleVerticalFill = options.PreferReversibleVerticalFill;
         settings.SmartOverlapAvoidance = (int)options.OverlapAvoidance;
+        settings.RemoveVideoBlackBars = options.RemoveVideoBlackBars;
+        settings.VideoBlackBarTendency = (int)options.VideoBlackBarTendency;
         WriteStoredSettings(settings);
     }
 
@@ -175,6 +179,8 @@ internal sealed class SettingsStore
         public int? SmartSizeTendency { get; set; }
         public int? SmartOverlapAvoidance { get; set; }
         public bool? PreferReversibleVerticalFill { get; set; }
+        public bool? RemoveVideoBlackBars { get; set; }
+        public int? VideoBlackBarTendency { get; set; }
 
         public double? PreserveLayoutWeight { get; set; }
         public double? ResizeResistanceWeight { get; set; }
