@@ -115,7 +115,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             }
 
             _mainWindow.SetHotkeyRegistration(requested, success: true, message);
-            _mainWindow.SetActivity($"快捷键已改为 {requested}。鼠标按钮仍然随时可用。");
+            _mainWindow.SetActivity($"快捷键已改为 {requested}。");
             UpdateTrayText(requested);
             return;
         }
@@ -137,8 +137,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 _tidyOptions,
                 _smartBehaviorOptions,
                 success: true,
-                "整理设置已保存并立即生效。");
-            _mainWindow.SetActivity("整理设置已更新；下一次整理会使用新偏好。");
+                string.Empty);
         }
         catch (Exception exception)
         {
@@ -248,8 +247,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
             if (plan.Count > 0)
             {
-                // Some applications may report a move/size-end event after NeatWin changes their
-                // rectangle. Suppress that short tail so automatic tidy cannot feed back into itself.
                 _autoTidyManager.SuppressFor(650);
                 _windowManager.Apply(plan);
             }
