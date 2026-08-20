@@ -80,8 +80,10 @@ public sealed class CoreBehaviorTests
         var rightTarget = TargetFor(plan, right);
 
         Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 1);
-        Assert.Equal(left.VisualRect.Size(), leftTarget.Size());
-        Assert.Equal(right.VisualRect.Size(), rightTarget.Size());
+        Assert.Equal(left.VisualRect.Width, leftTarget.Width);
+        Assert.Equal(left.VisualRect.Height, leftTarget.Height);
+        Assert.Equal(right.VisualRect.Width, rightTarget.Width);
+        Assert.Equal(right.VisualRect.Height, rightTarget.Height);
         Assert.True(Math.Abs(leftTarget.X - left.VisualRect.X) < Math.Abs(rightTarget.X - right.VisualRect.X));
     }
 
@@ -307,6 +309,27 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
+    public void SmartMode_DoesNotCreateCascadingRelationsAfterFirstMove()
+    {
+        var left = Window(1, new RectI(200, 200, 500, 500), 0);
+        var middle = Window(2, new RectI(670, 200, 500, 500), 1);
+        var right = Window(3, new RectI(1220, 200, 500, 500), 2);
+
+        var plan = new TidyEngine().CreatePlan(
+            [Visible(left), Visible(middle), Visible(right)],
+            new TidyOptions(RescueOffscreenWindows: false));
+        var middleTarget = TargetFor(plan, middle);
+        var rightTarget = TargetFor(plan, right);
+
+        // Left/middle begin with a 30 px overlap, so resolving them pushes middle right. That makes
+        // the original 50 px middle/right gap become < 40 px. Because relationships are inferred
+        // once from the original layout, right must not suddenly join the component on a later pass.
+        Assert.NotEqual(middle.VisualRect, middleTarget);
+        Assert.Equal(right.VisualRect, rightTarget);
+        Assert.True(rightTarget.Left - middleTarget.Right > 0);
+    }
+
+    [Fact]
     public void SmartMode_PreservesThreeWindowTopologyWithoutRetiling()
     {
         var top = Window(1, new RectI(210, 120, 1480, 430), 0, foreground: true);
@@ -378,10 +401,3 @@ public sealed class CoreBehaviorTests
     private static RectI TargetFor(IReadOnlyList<TidyMove> plan, WindowSnapshot window) =>
         plan.FirstOrDefault(move => move.Window.Handle == window.Handle)?.TargetVisualRect ?? window.VisualRect;
 }
-
-internal static class RectITestExtensions
-{
-    internal static SizeI Size(this RectI rect) => new(rect.Width, rect.Height);
-}
-
-internal readonly record struct SizeI(int Width, int Height);
