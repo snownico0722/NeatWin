@@ -70,45 +70,61 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void TidyEngine_ClosesSmallHorizontalGap()
+    public void TidyEngine_ClosesSmallHorizontalGapWithoutResizing()
     {
-        var left = Window(1, new RectI(0, 0, 900, 1080), 0);
-        var right = Window(2, new RectI(924, 0, 996, 1080), 1);
+        var left = Window(1, new RectI(200, 180, 600, 520), 0, foreground: true);
+        var right = Window(2, new RectI(830, 180, 620, 520), 1);
 
         var plan = new TidyEngine().CreatePlan([Visible(left), Visible(right)]);
         var leftTarget = TargetFor(plan, left);
         var rightTarget = TargetFor(plan, right);
 
         Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 1);
-        Assert.InRange(Math.Abs(leftTarget.Left), 0, 1);
-        Assert.InRange(Math.Abs(1920 - rightTarget.Right), 0, 1);
+        Assert.Equal(left.VisualRect.Size(), leftTarget.Size());
+        Assert.Equal(right.VisualRect.Size(), rightTarget.Size());
+        Assert.True(Math.Abs(leftTarget.X - left.VisualRect.X) < Math.Abs(rightTarget.X - right.VisualRect.X));
     }
 
     [Fact]
-    public void TidyEngine_RemovesSmallHorizontalOverlap()
+    public void TidyEngine_RemovesSmallHorizontalOverlapWithoutResizing()
     {
-        var left = Window(1, new RectI(0, 0, 950, 1080), 0);
-        var right = Window(2, new RectI(930, 0, 990, 1080), 1);
+        var left = Window(1, new RectI(200, 180, 600, 520), 0);
+        var right = Window(2, new RectI(780, 180, 620, 520), 1);
 
         var plan = new TidyEngine().CreatePlan([Visible(left), Visible(right)]);
         var leftTarget = TargetFor(plan, left);
         var rightTarget = TargetFor(plan, right);
 
         Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 1);
+        Assert.Equal(left.VisualRect.Width, leftTarget.Width);
+        Assert.Equal(left.VisualRect.Height, leftTarget.Height);
+        Assert.Equal(right.VisualRect.Width, rightTarget.Width);
+        Assert.Equal(right.VisualRect.Height, rightTarget.Height);
     }
 
     [Fact]
-    public void TidyEngine_UsesNearbyScreenEdgesWithoutChangingLayoutModel()
+    public void TidyEngine_SnapsClearlyNearbyScreenEdgeByTranslation()
     {
-        var window = Window(1, new RectI(40, 40, 1840, 1000), 0);
+        var window = Window(1, new RectI(18, 220, 600, 500), 0);
 
         var plan = new TidyEngine().CreatePlan([Visible(window)]);
         var target = TargetFor(plan, window);
 
-        Assert.InRange(Math.Abs(target.Left - WorkArea.Left), 0, 1);
-        Assert.InRange(Math.Abs(target.Top - WorkArea.Top), 0, 1);
-        Assert.InRange(Math.Abs(target.Right - WorkArea.Right), 0, 1);
-        Assert.InRange(Math.Abs(target.Bottom - WorkArea.Bottom), 0, 1);
+        Assert.Equal(WorkArea.Left, target.Left);
+        Assert.Equal(window.VisualRect.Width, target.Width);
+        Assert.Equal(window.VisualRect.Height, target.Height);
+        Assert.Equal(window.VisualRect.Top, target.Top);
+    }
+
+    [Fact]
+    public void TidyEngine_DoesNotStretchNearFullWindowToFillScreen()
+    {
+        var window = Window(1, new RectI(18, 180, 1884, 650), 0);
+
+        var plan = new TidyEngine().CreatePlan([Visible(window)]);
+        var target = TargetFor(plan, window);
+
+        Assert.Equal(window.VisualRect, target);
     }
 
     [Fact]
@@ -199,7 +215,7 @@ public sealed class CoreBehaviorTests
     public void SmartMode_LegacySplitKnobsDoNotChangeUnifiedProfile()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
-        var right = Window(2, new RectI(760, 200, 500, 500), 1);
+        var right = Window(2, new RectI(730, 200, 500, 500), 1);
         var first = new TidyOptions(
             SmartStrength: SmartTidyStrength.Balanced,
             SmartHitTendency: SmartHitTendency.Cautious,
@@ -214,12 +230,8 @@ public sealed class CoreBehaviorTests
         var firstPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], first);
         var secondPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], second);
 
-        Assert.Equal(
-            TargetFor(firstPlan, left),
-            TargetFor(secondPlan, left));
-        Assert.Equal(
-            TargetFor(firstPlan, right),
-            TargetFor(secondPlan, right));
+        Assert.Equal(TargetFor(firstPlan, left), TargetFor(secondPlan, left));
+        Assert.Equal(TargetFor(firstPlan, right), TargetFor(secondPlan, right));
     }
 
     [Fact]
@@ -244,7 +256,7 @@ public sealed class CoreBehaviorTests
     public void SmartMode_OverallTendencyControlsRelationReach()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
-        var right = Window(2, new RectI(790, 200, 500, 500), 1);
+        var right = Window(2, new RectI(750, 200, 500, 500), 1);
         var gentle = new TidyOptions(
             SmartStrength: SmartTidyStrength.Gentle,
             RescueOffscreenWindows: false);
@@ -255,29 +267,51 @@ public sealed class CoreBehaviorTests
 
         Assert.Empty(gentlePlan);
         Assert.NotEmpty(assertivePlan);
+        Assert.InRange(
+            Math.Abs(TargetFor(assertivePlan, left).Right - TargetFor(assertivePlan, right).Left),
+            0,
+            1);
     }
 
     [Fact]
-    public void SmartMode_OverallTendencyControlsHowFarAWindowIsWillingToMove()
+    public void SmartMode_OverallTendencyControlsScreenReach()
     {
-        var window = Window(1, new RectI(80, 220, 600, 500), 0);
+        var window = Window(1, new RectI(30, 220, 600, 500), 0);
         var gentle = new TidyOptions(
             SmartStrength: SmartTidyStrength.Gentle,
             RescueOffscreenWindows: false);
         var assertive = gentle with { SmartStrength = SmartTidyStrength.Assertive };
 
-        var gentleTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], gentle), window);
+        var gentlePlan = new TidyEngine().CreatePlan([Visible(window)], gentle);
         var assertiveTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], assertive), window);
 
-        Assert.True(assertiveTarget.Left < gentleTarget.Left);
+        Assert.Empty(gentlePlan);
+        Assert.Equal(0, assertiveTarget.Left);
+        Assert.Equal(window.VisualRect.Width, assertiveTarget.Width);
     }
 
     [Fact]
-    public void SmartMode_ConvergesThreeWindowTopologyWithoutRetiling()
+    public void SmartMode_ForegroundWindowMovesLessWhenClosingGap()
     {
-        var top = Window(1, new RectI(18, 16, 1880, 500), 0, foreground: true);
-        var bottomLeft = Window(2, new RectI(24, 535, 900, 526), 1);
-        var bottomRight = Window(3, new RectI(945, 531, 950, 532), 2);
+        var foreground = Window(1, new RectI(300, 200, 500, 500), 0, foreground: true);
+        var peer = Window(2, new RectI(830, 200, 500, 500), 1);
+
+        var plan = new TidyEngine().CreatePlan([Visible(foreground), Visible(peer)]);
+        var foregroundTarget = TargetFor(plan, foreground);
+        var peerTarget = TargetFor(plan, peer);
+
+        Assert.InRange(Math.Abs(foregroundTarget.Right - peerTarget.Left), 0, 1);
+        Assert.True(
+            Math.Abs(foregroundTarget.X - foreground.VisualRect.X) <
+            Math.Abs(peerTarget.X - peer.VisualRect.X));
+    }
+
+    [Fact]
+    public void SmartMode_PreservesThreeWindowTopologyWithoutRetiling()
+    {
+        var top = Window(1, new RectI(210, 120, 1480, 430), 0, foreground: true);
+        var bottomLeft = Window(2, new RectI(214, 576, 710, 390), 1);
+        var bottomRight = Window(3, new RectI(950, 574, 740, 392), 2);
         var options = new TidyOptions(
             SmartStrength: SmartTidyStrength.Assertive,
             RescueOffscreenWindows: true);
@@ -289,15 +323,15 @@ public sealed class CoreBehaviorTests
         var leftTarget = TargetFor(plan, bottomLeft);
         var rightTarget = TargetFor(plan, bottomRight);
 
-        Assert.InRange(Math.Abs(topTarget.Left - WorkArea.Left), 0, 2);
-        Assert.InRange(Math.Abs(topTarget.Right - WorkArea.Right), 0, 2);
-        Assert.InRange(Math.Abs(leftTarget.Left - WorkArea.Left), 0, 2);
-        Assert.InRange(Math.Abs(rightTarget.Right - WorkArea.Right), 0, 2);
-        Assert.InRange(Math.Abs(leftTarget.Bottom - WorkArea.Bottom), 0, 2);
-        Assert.InRange(Math.Abs(rightTarget.Bottom - WorkArea.Bottom), 0, 2);
-        Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 2);
-        Assert.InRange(Math.Abs(topTarget.Bottom - leftTarget.Top), 0, 2);
-        Assert.InRange(Math.Abs(topTarget.Bottom - rightTarget.Top), 0, 2);
+        Assert.Equal(top.VisualRect.Width, topTarget.Width);
+        Assert.Equal(top.VisualRect.Height, topTarget.Height);
+        Assert.Equal(bottomLeft.VisualRect.Width, leftTarget.Width);
+        Assert.Equal(bottomRight.VisualRect.Width, rightTarget.Width);
+        Assert.True(leftTarget.Left < rightTarget.Left);
+        Assert.True(topTarget.Top < leftTarget.Top);
+        Assert.InRange(Math.Abs(leftTarget.Right - rightTarget.Left), 0, 1);
+        Assert.InRange(Math.Abs(topTarget.Bottom - leftTarget.Top), 0, 1);
+        Assert.InRange(Math.Abs(topTarget.Bottom - rightTarget.Top), 0, 1);
     }
 
     [Fact]
@@ -344,3 +378,10 @@ public sealed class CoreBehaviorTests
     private static RectI TargetFor(IReadOnlyList<TidyMove> plan, WindowSnapshot window) =>
         plan.FirstOrDefault(move => move.Window.Handle == window.Handle)?.TargetVisualRect ?? window.VisualRect;
 }
+
+internal static class RectITestExtensions
+{
+    internal static SizeI Size(this RectI rect) => new(rect.Width, rect.Height);
+}
+
+internal readonly record struct SizeI(int Width, int Height);
