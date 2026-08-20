@@ -113,7 +113,7 @@ public sealed class SmartBehaviorTests
     {
         var a = Window(1, new RectI(100, 100, 700, 800), 0);
         var b = Window(2, new RectI(900, 200, 700, 400), 1);
-        var c = Window(3, new RectI(1340, 400, 580, 400), 2);
+        var c = Window(3, new RectI(1350, 400, 570, 400), 2);
 
         var plan = SmartPlanPostProcessor.Refine(
             [Visible(a), Visible(b), Visible(c)],
