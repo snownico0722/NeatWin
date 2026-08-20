@@ -10,6 +10,8 @@ internal sealed class TidyOptionsEditor : UserControl
     private readonly ComboBox _smartSizeTendency;
     private readonly ComboBox _smartOverlapAvoidance;
     private readonly CheckBox _preferReversibleVerticalFill;
+    private readonly CheckBox _removeVideoBlackBars;
+    private readonly ComboBox _videoBlackBarTendency;
     private readonly GroupBox _classicGroup;
     private readonly NumericUpDown _neighborSnap;
     private readonly NumericUpDown _alignmentSnap;
@@ -64,7 +66,7 @@ internal sealed class TidyOptionsEditor : UserControl
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 3,
-            RowCount = 5,
+            RowCount = 7,
         };
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
@@ -74,6 +76,8 @@ internal sealed class TidyOptionsEditor : UserControl
             smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         }
         smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         _smartGroup.Controls.Add(smartLayout);
 
         _smartStrength = AddChoiceRow(
@@ -115,11 +119,30 @@ internal sealed class TidyOptionsEditor : UserControl
         _preferReversibleVerticalFill = new CheckBox
         {
             AutoSize = true,
-            Text = "优先可逆纵向填满：合适时填满上下，拖标题栏可恢复整理前尺寸",
+            Text = "优先可逆纵向填满",
             Anchor = AnchorStyles.Left,
         };
         smartLayout.SetColumnSpan(_preferReversibleVerticalFill, 3);
         smartLayout.Controls.Add(_preferReversibleVerticalFill, 0, 4);
+
+        _removeVideoBlackBars = new CheckBox
+        {
+            AutoSize = true,
+            Text = "视频去黑边",
+            Anchor = AnchorStyles.Left,
+        };
+        _removeVideoBlackBars.CheckedChanged += (_, _) =>
+            _videoBlackBarTendency.Enabled = _removeVideoBlackBars.Checked;
+        smartLayout.Controls.Add(_removeVideoBlackBars, 0, 5);
+        smartLayout.SetColumnSpan(_removeVideoBlackBars, 3);
+
+        _videoBlackBarTendency = AddChoiceRow(
+            smartLayout,
+            6,
+            "调整倾向",
+            "只改浏览器窗口大小；空间不合适时会保守放弃或退化",
+            new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Shrink, "缩小优先"),
+            new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Expand, "放大优先"));
 
         _classicGroup = new GroupBox
         {
@@ -245,6 +268,8 @@ internal sealed class TidyOptionsEditor : UserControl
             {
                 OverlapAvoidance = SelectedValue(_smartOverlapAvoidance, SmartOverlapAvoidance.Balanced),
                 PreferReversibleVerticalFill = _preferReversibleVerticalFill.Checked,
+                RemoveVideoBlackBars = _removeVideoBlackBars.Checked,
+                VideoBlackBarTendency = SelectedValue(_videoBlackBarTendency, VideoBlackBarTendency.Shrink),
             };
         }
         else
@@ -270,6 +295,9 @@ internal sealed class TidyOptionsEditor : UserControl
         SelectChoice(_smartSizeTendency, options.SmartSizeTendency);
         SelectChoice(_smartOverlapAvoidance, behaviorOptions.OverlapAvoidance);
         _preferReversibleVerticalFill.Checked = behaviorOptions.PreferReversibleVerticalFill;
+        _removeVideoBlackBars.Checked = behaviorOptions.RemoveVideoBlackBars;
+        SelectChoice(_videoBlackBarTendency, behaviorOptions.VideoBlackBarTendency);
+        _videoBlackBarTendency.Enabled = behaviorOptions.RemoveVideoBlackBars;
 
         _neighborSnap.Value = ClampToDecimal(options.NeighborSnapDistance, _neighborSnap.Minimum, _neighborSnap.Maximum);
         _alignmentSnap.Value = ClampToDecimal(options.AlignmentSnapDistance, _alignmentSnap.Minimum, _alignmentSnap.Maximum);
