@@ -6,9 +6,6 @@ internal sealed class TidyOptionsEditor : UserControl
 {
     private readonly GroupBox _smartGroup;
     private readonly ComboBox _smartStrength;
-    private readonly ComboBox _smartHitTendency;
-    private readonly ComboBox _smartSizeTendency;
-    private readonly ComboBox _smartOverlapAvoidance;
     private readonly CheckBox _preferReversibleVerticalFill;
     private readonly CheckBox _removeVideoBlackBars;
     private readonly ComboBox _videoBlackBarTendency;
@@ -66,15 +63,12 @@ internal sealed class TidyOptionsEditor : UserControl
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 3,
-            RowCount = 7,
+            RowCount = 4,
         };
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
         smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
-        for (var row = 0; row < 4; row++)
-        {
-            smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        }
+        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -83,38 +77,11 @@ internal sealed class TidyOptionsEditor : UserControl
         _smartStrength = AddChoiceRow(
             smartLayout,
             0,
-            "整理强度",
-            "决定整体愿意改动多少",
-            new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Gentle, "轻柔"),
+            "整理倾向",
+            "只微调整体保守程度，不单独暴露内部权重",
+            new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Gentle, "保守"),
             new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Balanced, "平衡"),
             new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Assertive, "积极"));
-
-        _smartHitTendency = AddChoiceRow(
-            smartLayout,
-            1,
-            "命中倾向",
-            "决定多容易把相近窗口识别为同一组",
-            new ChoiceOption<SmartHitTendency>(SmartHitTendency.Cautious, "谨慎"),
-            new ChoiceOption<SmartHitTendency>(SmartHitTendency.Balanced, "平衡"),
-            new ChoiceOption<SmartHitTendency>(SmartHitTendency.Sensitive, "灵敏"));
-
-        _smartSizeTendency = AddChoiceRow(
-            smartLayout,
-            2,
-            "尺寸倾向",
-            "决定更偏向保持尺寸，还是扩大利用空白",
-            new ChoiceOption<SmartSizeTendency>(SmartSizeTendency.Preserve, "保持尺寸"),
-            new ChoiceOption<SmartSizeTendency>(SmartSizeTendency.Balanced, "平衡"),
-            new ChoiceOption<SmartSizeTendency>(SmartSizeTendency.Expand, "扩大利用"));
-
-        _smartOverlapAvoidance = AddChoiceRow(
-            smartLayout,
-            3,
-            "避免重叠",
-            "决定多深的窗口重叠也要主动分开",
-            new ChoiceOption<SmartOverlapAvoidance>(SmartOverlapAvoidance.Gentle, "轻度"),
-            new ChoiceOption<SmartOverlapAvoidance>(SmartOverlapAvoidance.Balanced, "平衡"),
-            new ChoiceOption<SmartOverlapAvoidance>(SmartOverlapAvoidance.Strong, "强力"));
 
         _preferReversibleVerticalFill = new CheckBox
         {
@@ -123,7 +90,7 @@ internal sealed class TidyOptionsEditor : UserControl
             Anchor = AnchorStyles.Left,
         };
         smartLayout.SetColumnSpan(_preferReversibleVerticalFill, 3);
-        smartLayout.Controls.Add(_preferReversibleVerticalFill, 0, 4);
+        smartLayout.Controls.Add(_preferReversibleVerticalFill, 0, 1);
 
         _removeVideoBlackBars = new CheckBox
         {
@@ -131,14 +98,14 @@ internal sealed class TidyOptionsEditor : UserControl
             Text = "视频去黑边",
             Anchor = AnchorStyles.Left,
         };
-        smartLayout.Controls.Add(_removeVideoBlackBars, 0, 5);
         smartLayout.SetColumnSpan(_removeVideoBlackBars, 3);
+        smartLayout.Controls.Add(_removeVideoBlackBars, 0, 2);
 
         _videoBlackBarTendency = AddChoiceRow(
             smartLayout,
-            6,
-            "调整倾向",
-            "只改浏览器窗口大小；空间不合适时会保守放弃或退化",
+            3,
+            "视频调整倾向",
+            "只决定无黑边解更偏向缩小还是放大",
             new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Shrink, "缩小优先"),
             new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Expand, "放大优先"));
         _removeVideoBlackBars.CheckedChanged += (_, _) =>
@@ -261,12 +228,13 @@ internal sealed class TidyOptionsEditor : UserControl
             options = options with
             {
                 SmartStrength = SelectedValue(_smartStrength, SmartTidyStrength.Balanced),
-                SmartHitTendency = SelectedValue(_smartHitTendency, SmartHitTendency.Balanced),
-                SmartSizeTendency = SelectedValue(_smartSizeTendency, SmartSizeTendency.Balanced),
+                // Legacy split Smart knobs stay neutral and are ignored by the unified resolver.
+                SmartHitTendency = SmartHitTendency.Balanced,
+                SmartSizeTendency = SmartSizeTendency.Balanced,
             };
             behaviorOptions = behaviorOptions with
             {
-                OverlapAvoidance = SelectedValue(_smartOverlapAvoidance, SmartOverlapAvoidance.Balanced),
+                OverlapAvoidance = SmartOverlapAvoidance.Balanced,
                 PreferReversibleVerticalFill = _preferReversibleVerticalFill.Checked,
                 RemoveVideoBlackBars = _removeVideoBlackBars.Checked,
                 VideoBlackBarTendency = SelectedValue(_videoBlackBarTendency, VideoBlackBarTendency.Shrink),
@@ -291,9 +259,6 @@ internal sealed class TidyOptionsEditor : UserControl
     private void SetControls(TidyOptions options, SmartBehaviorOptions behaviorOptions)
     {
         SelectChoice(_smartStrength, options.SmartStrength);
-        SelectChoice(_smartHitTendency, options.SmartHitTendency);
-        SelectChoice(_smartSizeTendency, options.SmartSizeTendency);
-        SelectChoice(_smartOverlapAvoidance, behaviorOptions.OverlapAvoidance);
         _preferReversibleVerticalFill.Checked = behaviorOptions.PreferReversibleVerticalFill;
         _removeVideoBlackBars.Checked = behaviorOptions.RemoveVideoBlackBars;
         SelectChoice(_videoBlackBarTendency, behaviorOptions.VideoBlackBarTendency);
