@@ -6,13 +6,13 @@ internal static class UiTheme
 {
     internal static readonly Color Page = Color.FromArgb(246, 247, 249);
     internal static readonly Color Surface = Color.White;
-    internal static readonly Color SurfaceMuted = Color.FromArgb(241, 243, 246);
-    internal static readonly Color Border = Color.FromArgb(224, 228, 234);
-    internal static readonly Color Text = Color.FromArgb(28, 32, 38);
-    internal static readonly Color TextMuted = Color.FromArgb(105, 113, 124);
-    internal static readonly Color Accent = Color.FromArgb(47, 111, 235);
-    internal static readonly Color AccentHover = Color.FromArgb(38, 94, 205);
-    internal static readonly Color Danger = Color.FromArgb(190, 55, 55);
+    internal static readonly Color SurfaceMuted = Color.FromArgb(237, 240, 244);
+    internal static readonly Color Border = Color.FromArgb(205, 211, 220);
+    internal static readonly Color Text = Color.FromArgb(18, 21, 25);
+    internal static readonly Color TextMuted = Color.FromArgb(72, 79, 89);
+    internal static readonly Color Accent = Color.FromArgb(43, 103, 222);
+    internal static readonly Color AccentHover = Color.FromArgb(35, 87, 190);
+    internal static readonly Color Danger = Color.FromArgb(180, 45, 45);
 
     internal static Font Semibold(float size) => new("Segoe UI Semibold", size, FontStyle.Regular);
 
@@ -22,7 +22,7 @@ internal static class UiTheme
         button.FlatAppearance.BorderSize = 0;
         button.BackColor = Accent;
         button.ForeColor = Color.White;
-        button.Font = Semibold(button.Font.Size + 0.5F);
+        button.Font = Semibold(Math.Max(10F, button.Font.Size + 0.5F));
         button.Cursor = Cursors.Hand;
         button.UseVisualStyleBackColor = false;
         button.FlatAppearance.MouseOverBackColor = AccentHover;
@@ -36,6 +36,7 @@ internal static class UiTheme
         button.FlatAppearance.BorderSize = 1;
         button.BackColor = Surface;
         button.ForeColor = Text;
+        button.Font = Semibold(Math.Max(9F, button.Font.Size));
         button.Cursor = Cursors.Hand;
         button.UseVisualStyleBackColor = false;
         button.FlatAppearance.MouseOverBackColor = SurfaceMuted;
@@ -47,6 +48,7 @@ internal static class UiTheme
         combo.FlatStyle = FlatStyle.Flat;
         combo.BackColor = Surface;
         combo.ForeColor = Text;
+        combo.Font = new Font("Segoe UI", 9.5F);
     }
 
     internal static void StyleChip(CheckBox chip)
@@ -58,14 +60,15 @@ internal static class UiTheme
         chip.FlatAppearance.BorderSize = 1;
         chip.FlatAppearance.BorderColor = Border;
         chip.BackColor = Surface;
-        chip.ForeColor = TextMuted;
+        chip.ForeColor = Text;
+        chip.Font = Semibold(9F);
         chip.Cursor = Cursors.Hand;
         chip.UseVisualStyleBackColor = false;
         chip.CheckedChanged += (_, _) =>
         {
-            chip.BackColor = chip.Checked ? Color.FromArgb(232, 240, 255) : Surface;
-            chip.ForeColor = chip.Checked ? Accent : TextMuted;
-            chip.FlatAppearance.BorderColor = chip.Checked ? Color.FromArgb(164, 190, 245) : Border;
+            chip.BackColor = chip.Checked ? Accent : Surface;
+            chip.ForeColor = chip.Checked ? Color.White : Text;
+            chip.FlatAppearance.BorderColor = chip.Checked ? Accent : Border;
         };
     }
 }
@@ -75,8 +78,8 @@ internal sealed class ModernCard : Panel
     internal ModernCard()
     {
         BackColor = UiTheme.Surface;
-        Padding = new Padding(16);
-        Margin = new Padding(0, 0, 0, 12);
+        Padding = new Padding(18);
+        Margin = new Padding(0, 0, 0, 14);
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
@@ -99,7 +102,7 @@ internal sealed class ModernToggle : CheckBox
     internal ModernToggle()
     {
         AutoSize = false;
-        Size = new Size(42, 22);
+        Size = new Size(46, 24);
         Text = string.Empty;
         Cursor = Cursors.Hand;
         SetStyle(
@@ -128,8 +131,8 @@ internal sealed class ModernToggle : CheckBox
 
         var track = new Rectangle(1, 2, Width - 2, Height - 4);
         var trackColor = !Enabled
-            ? Color.FromArgb(218, 221, 226)
-            : Checked ? UiTheme.Accent : Color.FromArgb(194, 199, 207);
+            ? Color.FromArgb(209, 214, 222)
+            : Checked ? UiTheme.Accent : Color.FromArgb(166, 173, 184);
         using (var trackBrush = new SolidBrush(trackColor))
         using (var trackPath = RoundedRect(track, track.Height / 2F))
         {
@@ -166,8 +169,8 @@ internal sealed class SegmentedSelector<T> : UserControl
 
     internal SegmentedSelector(params SegmentOption<T>[] options)
     {
-        Height = 34;
-        MinimumSize = new Size(120, 34);
+        Height = 38;
+        MinimumSize = new Size(120, 38);
         BackColor = UiTheme.SurfaceMuted;
         Padding = new Padding(2);
 
@@ -191,7 +194,7 @@ internal sealed class SegmentedSelector<T> : UserControl
                 Text = option.Name,
                 Margin = new Padding(0),
                 FlatStyle = FlatStyle.Flat,
-                Font = UiTheme.Semibold(8.5F),
+                Font = UiTheme.Semibold(9.5F),
                 Cursor = Cursors.Hand,
                 UseVisualStyleBackColor = false,
             };
@@ -237,8 +240,8 @@ internal sealed class SegmentedSelector<T> : UserControl
         foreach (var item in _items)
         {
             var selected = _hasValue && EqualityComparer<T>.Default.Equals(item.Value, _value);
-            item.Button.BackColor = selected ? UiTheme.Surface : UiTheme.SurfaceMuted;
-            item.Button.ForeColor = selected ? UiTheme.Accent : UiTheme.TextMuted;
+            item.Button.BackColor = selected ? UiTheme.Accent : UiTheme.SurfaceMuted;
+            item.Button.ForeColor = selected ? Color.White : UiTheme.Text;
         }
     }
 }
