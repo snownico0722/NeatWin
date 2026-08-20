@@ -66,31 +66,31 @@ public sealed class TidyEngine
 
     private static TidyOptions ResolveSmartProfile(TidyOptions options)
     {
-        // Smart is intentionally one coordinated temperament rather than several independent
-        // sliders. The profile changes all internal parameters together, and screen usage remains a
-        // weak cosmetic preference instead of a goal to maximize window area.
+        // Smart is one coordinated temperament rather than several independent sliders. Reach is
+        // kept modest so distant windows are not pulled toward edges/groups, while admitted snap
+        // relations remain strong enough to finish cleanly instead of stopping a few pixels short.
         return options.SmartStrength switch
         {
             SmartTidyStrength.Gentle => options with
             {
                 PreserveLayoutWeight = 1.45,
-                ResizeResistanceWeight = 0.45,
-                OrderlinessWeight = 1.30,
-                SpaceUsageWeight = 0.30,
+                ResizeResistanceWeight = 0.35,
+                OrderlinessWeight = 1.35,
+                SpaceUsageWeight = 0.80,
                 SmartIterations = 28,
                 NeighborSnapDistance = 56,
                 AlignmentSnapDistance = 18,
-                ScreenSnapDistance = 56,
+                ScreenSnapDistance = 48,
                 MaximumEdgeAdjustment = 64,
                 MaximumSizeChangeRatio = 0.08,
             },
             SmartTidyStrength.Assertive => options with
             {
                 PreserveLayoutWeight = 0.78,
-                ResizeResistanceWeight = 0.16,
-                OrderlinessWeight = 2.25,
-                SpaceUsageWeight = 0.55,
-                SmartIterations = 48,
+                ResizeResistanceWeight = 0.06,
+                OrderlinessWeight = 2.35,
+                SpaceUsageWeight = 1.10,
+                SmartIterations = 52,
                 NeighborSnapDistance = 104,
                 AlignmentSnapDistance = 32,
                 ScreenSnapDistance = 96,
@@ -100,10 +100,10 @@ public sealed class TidyEngine
             _ => options with
             {
                 PreserveLayoutWeight = 1.00,
-                ResizeResistanceWeight = 0.28,
-                OrderlinessWeight = 1.75,
-                SpaceUsageWeight = 0.42,
-                SmartIterations = 36,
+                ResizeResistanceWeight = 0.12,
+                OrderlinessWeight = 1.85,
+                SpaceUsageWeight = 1.00,
+                SmartIterations = 40,
                 NeighborSnapDistance = 76,
                 AlignmentSnapDistance = 24,
                 ScreenSnapDistance = 72,
