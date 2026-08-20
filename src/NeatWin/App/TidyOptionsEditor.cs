@@ -131,8 +131,6 @@ internal sealed class TidyOptionsEditor : UserControl
             Text = "视频去黑边",
             Anchor = AnchorStyles.Left,
         };
-        _removeVideoBlackBars.CheckedChanged += (_, _) =>
-            _videoBlackBarTendency.Enabled = _removeVideoBlackBars.Checked;
         smartLayout.Controls.Add(_removeVideoBlackBars, 0, 5);
         smartLayout.SetColumnSpan(_removeVideoBlackBars, 3);
 
@@ -143,6 +141,8 @@ internal sealed class TidyOptionsEditor : UserControl
             "只改浏览器窗口大小；空间不合适时会保守放弃或退化",
             new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Shrink, "缩小优先"),
             new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Expand, "放大优先"));
+        _removeVideoBlackBars.CheckedChanged += (_, _) =>
+            _videoBlackBarTendency.Enabled = _removeVideoBlackBars.Checked;
 
         _classicGroup = new GroupBox
         {
