@@ -7,9 +7,9 @@ public sealed class SmartBehaviorTests
     private static readonly RectI WorkArea = new(0, 0, 1920, 1080);
 
     [Fact]
-    public void VerticalFillPreference_FillsNearlyFullHeightWindow()
+    public void VerticalFillPreference_FillsOnlyClearlyNearlyFullHeightWindow()
     {
-        var window = Window(1, new RectI(300, 40, 700, 1000), 0);
+        var window = Window(1, new RectI(300, 20, 700, 1040), 0);
         var plan = SmartPlanPostProcessor.Refine(
             [Visible(window)],
             [],
@@ -25,9 +25,22 @@ public sealed class SmartBehaviorTests
     }
 
     [Fact]
-    public void VerticalFillPreference_CanBeDisabled()
+    public void VerticalFillPreference_DoesNotPromoteMerelyTallWindow()
     {
         var window = Window(1, new RectI(300, 40, 700, 1000), 0);
+        var plan = SmartPlanPostProcessor.Refine(
+            [Visible(window)],
+            [],
+            new TidyOptions(RescueOffscreenWindows: false),
+            new SmartBehaviorOptions(PreferReversibleVerticalFill: true));
+
+        Assert.Empty(plan);
+    }
+
+    [Fact]
+    public void VerticalFillPreference_CanBeDisabled()
+    {
+        var window = Window(1, new RectI(300, 20, 700, 1040), 0);
         var plan = SmartPlanPostProcessor.Refine(
             [Visible(window)],
             [],
@@ -53,6 +66,21 @@ public sealed class SmartBehaviorTests
         var rightTarget = TargetFor(plan, right);
 
         Assert.Equal(0, OverlapArea(leftTarget, rightTarget));
+    }
+
+    [Fact]
+    public void BalancedOverlapAvoidance_LeavesDeepLikelyIntentionalOverlapAlone()
+    {
+        var left = Window(1, new RectI(200, 200, 600, 500), 0);
+        var right = Window(2, new RectI(500, 200, 600, 500), 1);
+
+        var plan = SmartPlanPostProcessor.Refine(
+            [Visible(left), Visible(right)],
+            [],
+            new TidyOptions(RescueOffscreenWindows: false),
+            new SmartBehaviorOptions(OverlapAvoidance: SmartOverlapAvoidance.Balanced));
+
+        Assert.Empty(plan);
     }
 
     [Fact]
@@ -85,7 +113,7 @@ public sealed class SmartBehaviorTests
     {
         var a = Window(1, new RectI(100, 100, 700, 800), 0);
         var b = Window(2, new RectI(900, 200, 700, 400), 1);
-        var c = Window(3, new RectI(1320, 400, 600, 400), 2);
+        var c = Window(3, new RectI(1340, 400, 580, 400), 2);
 
         var plan = SmartPlanPostProcessor.Refine(
             [Visible(a), Visible(b), Visible(c)],
@@ -109,7 +137,7 @@ public sealed class SmartBehaviorTests
     public void OverlapAvoidance_ReallocatesBlockedMovementToWindowWithFreeSpace()
     {
         var top = Window(1, new RectI(1000, 0, 700, 500), 0);
-        var bottom = Window(2, new RectI(1000, 400, 700, 500), 1);
+        var bottom = Window(2, new RectI(1000, 410, 700, 500), 1);
 
         var plan = SmartPlanPostProcessor.Refine(
             [Visible(top), Visible(bottom)],
