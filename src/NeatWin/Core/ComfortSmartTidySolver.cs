@@ -16,6 +16,7 @@ internal static class ComfortSmartTidySolver
         TidyOptions options)
     {
         var result = new List<TidyMove>();
+        var profile = ResolveProfile(options.SmartStrength);
 
         foreach (var monitorGroup in visibleWindows.GroupBy(static item => item.Window.MonitorHandle))
         {
@@ -30,8 +31,8 @@ internal static class ComfortSmartTidySolver
                 continue;
             }
 
-            var x = SolveAxis(states, Axis.Horizontal, options);
-            var y = SolveAxis(states, Axis.Vertical, options);
+            var x = SolveAxis(states, Axis.Horizontal, options, profile);
+            var y = SolveAxis(states, Axis.Vertical, options, profile);
 
             for (var index = 0; index < states.Count; index++)
             {
@@ -58,14 +59,34 @@ internal static class ComfortSmartTidySolver
         return result;
     }
 
+    private static ComfortProfile ResolveProfile(SmartTidyStrength strength) => strength switch
+    {
+        SmartTidyStrength.Gentle => new ComfortProfile(
+            NeighborRadius: 24,
+            AlignmentRadius: 10,
+            ScreenRadius: 14,
+            MovementBudget: 48),
+        SmartTidyStrength.Assertive => new ComfortProfile(
+            NeighborRadius: 64,
+            AlignmentRadius: 24,
+            ScreenRadius: 36,
+            MovementBudget: 104),
+        _ => new ComfortProfile(
+            NeighborRadius: 40,
+            AlignmentRadius: 16,
+            ScreenRadius: 24,
+            MovementBudget: 72),
+    };
+
     private static int[] SolveAxis(
         IReadOnlyList<State> states,
         Axis axis,
-        TidyOptions options)
+        TidyOptions options,
+        ComfortProfile profile)
     {
         var count = states.Count;
         var union = new PotentialUnionFind(count);
-        var candidates = InferPairConstraints(states, axis, options)
+        var candidates = InferPairConstraints(states, axis, profile)
             .OrderByDescending(static item => item.Priority)
             .ToArray();
 
@@ -96,7 +117,7 @@ internal static class ComfortSmartTidySolver
             {
                 var potential = union.Potential(index);
                 var state = states[index];
-                var budget = Math.Max(0, options.MaximumEdgeAdjustment);
+                var budget = profile.MovementBudget;
 
                 lower = Math.Max(lower, -budget - potential);
                 upper = Math.Min(upper, budget - potential);
@@ -111,7 +132,7 @@ internal static class ComfortSmartTidySolver
                 weightedPotential += potential * state.Importance;
                 totalImportance += state.Importance;
 
-                if (TryGetScreenAnchor(state, axis, options.ScreenSnapDistance, out var anchor))
+                if (TryGetScreenAnchor(state, axis, profile.ScreenRadius, out var anchor))
                 {
                     screenAnchors.Add(anchor with
                     {
@@ -129,20 +150,23 @@ internal static class ComfortSmartTidySolver
                 foreach (var index in members)
                 {
                     translation[index] = TryGetScreenAnchor(
-                        states[index], axis, options.ScreenSnapDistance, out var anchor)
-                        ? ClampIndividualShift(states[index], axis, anchor.WindowShift, options)
+                        states[index], axis, profile.ScreenRadius, out var anchor)
+                        ? ClampIndividualShift(states[index], axis, anchor.WindowShift, options, profile)
                         : 0;
                 }
                 continue;
             }
 
+            // For an unconstrained component this is the exact least-squares minimum of total
+            // weighted movement. Foreground / highly visible windows therefore move less without
+            // needing a separate post-processing rule.
             var rootTarget = totalImportance > 0
                 ? -weightedPotential / totalImportance
                 : 0;
 
             // Screen edges are discrete anchors, not a continuous "use more space" force. A
             // component uses at most one compatible screen anchor per axis; pair relationships stay
-            // exact and the other outer edge is allowed to remain slightly inset rather than resize.
+            // exact and the other outer edge may remain slightly inset rather than resizing.
             var bestAnchor = screenAnchors
                 .Where(anchor => anchor.RootTarget >= lower - 0.5 && anchor.RootTarget <= upper + 0.5)
                 .OrderByDescending(static anchor => anchor.Score)
@@ -165,10 +189,10 @@ internal static class ComfortSmartTidySolver
     private static IEnumerable<PairConstraint> InferPairConstraints(
         IReadOnlyList<State> states,
         Axis axis,
-        TidyOptions options)
+        ComfortProfile profile)
     {
-        var neighborRadius = Math.Max(0, options.NeighborSnapDistance);
-        var alignmentRadius = Math.Max(0, options.AlignmentSnapDistance);
+        var neighborRadius = profile.NeighborRadius;
+        var alignmentRadius = profile.AlignmentRadius;
 
         for (var first = 0; first < states.Count; first++)
         {
@@ -180,7 +204,7 @@ internal static class ComfortSmartTidySolver
                 if (axis == Axis.Horizontal)
                 {
                     var verticalOverlap = a.VerticalOverlapRatio(b);
-                    if (verticalOverlap >= MinimumOrthogonalOverlap && neighborRadius > 0)
+                    if (verticalOverlap >= MinimumOrthogonalOverlap)
                     {
                         var aBeforeB = CenterX(a) <= CenterX(b);
                         var leftIndex = aBeforeB ? first : second;
@@ -199,7 +223,7 @@ internal static class ComfortSmartTidySolver
                         }
                     }
 
-                    if (IsVerticallyRelated(a, b, neighborRadius) && alignmentRadius > 0)
+                    if (IsVerticallyRelated(a, b, neighborRadius))
                     {
                         var leftError = b.Left - a.Left;
                         var rightError = b.Right - a.Right;
@@ -209,8 +233,6 @@ internal static class ComfortSmartTidySolver
                         if (Math.Abs(selected) <= alignmentRadius)
                         {
                             var proximity = Proximity(Math.Abs(selected), alignmentRadius);
-                            // Make the selected equal-edge relation exact:
-                            // (edgeB + dB) - (edgeA + dA) = 0.
                             yield return new PairConstraint(
                                 first,
                                 second,
@@ -222,7 +244,7 @@ internal static class ComfortSmartTidySolver
                 else
                 {
                     var horizontalOverlap = a.HorizontalOverlapRatio(b);
-                    if (horizontalOverlap >= MinimumOrthogonalOverlap && neighborRadius > 0)
+                    if (horizontalOverlap >= MinimumOrthogonalOverlap)
                     {
                         var aBeforeB = CenterY(a) <= CenterY(b);
                         var topIndex = aBeforeB ? first : second;
@@ -241,7 +263,7 @@ internal static class ComfortSmartTidySolver
                         }
                     }
 
-                    if (IsHorizontallyRelated(a, b, neighborRadius) && alignmentRadius > 0)
+                    if (IsHorizontallyRelated(a, b, neighborRadius))
                     {
                         var topError = b.Top - a.Top;
                         var bottomError = b.Bottom - a.Bottom;
@@ -338,11 +360,15 @@ internal static class ComfortSmartTidySolver
             Score: 300 + (proximity * 150));
     }
 
-    private static int ClampIndividualShift(State state, Axis axis, int desired, TidyOptions options)
+    private static int ClampIndividualShift(
+        State state,
+        Axis axis,
+        int desired,
+        TidyOptions options,
+        ComfortProfile profile)
     {
-        var budget = Math.Max(0, options.MaximumEdgeAdjustment);
-        var minimum = -budget;
-        var maximum = budget;
+        var minimum = -profile.MovementBudget;
+        var maximum = profile.MovementBudget;
         if (options.RescueOffscreenWindows)
         {
             GetWorkAreaTranslationRange(state, axis, out var workMinimum, out var workMaximum);
@@ -499,6 +525,12 @@ internal static class ComfortSmartTidySolver
         Horizontal,
         Vertical,
     }
+
+    private readonly record struct ComfortProfile(
+        int NeighborRadius,
+        int AlignmentRadius,
+        int ScreenRadius,
+        int MovementBudget);
 
     private readonly record struct PairConstraint(
         int First,
