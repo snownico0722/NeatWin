@@ -61,14 +61,12 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void TidyOptions_DefaultToSmartBalancedProfiles()
+    public void TidyOptions_DefaultToSmartBalancedProfile()
     {
         var options = new TidyOptions();
 
         Assert.Equal(TidyAlgorithmMode.Smart, options.AlgorithmMode);
         Assert.Equal(SmartTidyStrength.Balanced, options.SmartStrength);
-        Assert.Equal(SmartHitTendency.Balanced, options.SmartHitTendency);
-        Assert.Equal(SmartSizeTendency.Balanced, options.SmartSizeTendency);
     }
 
     [Fact]
@@ -198,24 +196,30 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void SmartMode_HitTendencyControlsWhichRelationsAreInferred()
+    public void SmartMode_LegacySplitKnobsDoNotChangeUnifiedProfile()
     {
         var left = Window(1, new RectI(200, 200, 500, 500), 0);
         var right = Window(2, new RectI(760, 200, 500, 500), 1);
-        var cautious = new TidyOptions(
+        var first = new TidyOptions(
+            SmartStrength: SmartTidyStrength.Balanced,
             SmartHitTendency: SmartHitTendency.Cautious,
+            SmartSizeTendency: SmartSizeTendency.Preserve,
             RescueOffscreenWindows: false);
-        var sensitive = cautious with { SmartHitTendency = SmartHitTendency.Sensitive };
+        var second = first with
+        {
+            SmartHitTendency = SmartHitTendency.Sensitive,
+            SmartSizeTendency = SmartSizeTendency.Expand,
+        };
 
-        var cautiousPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], cautious);
-        var sensitivePlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], sensitive);
+        var firstPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], first);
+        var secondPlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], second);
 
-        Assert.Empty(cautiousPlan);
-        Assert.NotEmpty(sensitivePlan);
-        Assert.InRange(
-            Math.Abs(TargetFor(sensitivePlan, left).Right - TargetFor(sensitivePlan, right).Left),
-            0,
-            3);
+        Assert.Equal(
+            TargetFor(firstPlan, left),
+            TargetFor(secondPlan, left));
+        Assert.Equal(
+            TargetFor(firstPlan, right),
+            TargetFor(secondPlan, right));
     }
 
     [Fact]
@@ -225,7 +229,7 @@ public sealed class CoreBehaviorTests
         var right = Window(2, new RectI(780, 200, 500, 500), 1);
         var options = new TidyOptions(
             AlgorithmMode: TidyAlgorithmMode.Smart,
-            SmartHitTendency: SmartHitTendency.Cautious,
+            SmartStrength: SmartTidyStrength.Balanced,
             NeighborSnapDistance: 240,
             AlignmentSnapDistance: 120,
             ScreenSnapDistance: 240,
@@ -237,7 +241,24 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void SmartMode_StrengthControlsHowFarAWindowIsWillingToMove()
+    public void SmartMode_OverallTendencyControlsRelationReach()
+    {
+        var left = Window(1, new RectI(200, 200, 500, 500), 0);
+        var right = Window(2, new RectI(790, 200, 500, 500), 1);
+        var gentle = new TidyOptions(
+            SmartStrength: SmartTidyStrength.Gentle,
+            RescueOffscreenWindows: false);
+        var assertive = gentle with { SmartStrength = SmartTidyStrength.Assertive };
+
+        var gentlePlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], gentle);
+        var assertivePlan = new TidyEngine().CreatePlan([Visible(left), Visible(right)], assertive);
+
+        Assert.Empty(gentlePlan);
+        Assert.NotEmpty(assertivePlan);
+    }
+
+    [Fact]
+    public void SmartMode_OverallTendencyControlsHowFarAWindowIsWillingToMove()
     {
         var window = Window(1, new RectI(80, 220, 600, 500), 0);
         var gentle = new TidyOptions(
@@ -252,25 +273,6 @@ public sealed class CoreBehaviorTests
     }
 
     [Fact]
-    public void SmartMode_SizeTendencyControlsTranslationVersusResize()
-    {
-        var window = Window(1, new RectI(40, 220, 600, 500), 0);
-        var preserve = new TidyOptions(
-            SmartSizeTendency: SmartSizeTendency.Preserve,
-            RescueOffscreenWindows: false);
-        var expand = preserve with { SmartSizeTendency = SmartSizeTendency.Expand };
-
-        var preserveTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], preserve), window);
-        var expandTarget = TargetFor(new TidyEngine().CreatePlan([Visible(window)], expand), window);
-
-        var preserveWidthError = Math.Abs(preserveTarget.Width - window.VisualRect.Width);
-        var expandWidthError = Math.Abs(expandTarget.Width - window.VisualRect.Width);
-
-        Assert.True(preserveWidthError < expandWidthError);
-        Assert.True(preserveTarget.Left < window.VisualRect.Left);
-    }
-
-    [Fact]
     public void SmartMode_ConvergesThreeWindowTopologyWithoutRetiling()
     {
         var top = Window(1, new RectI(18, 16, 1880, 500), 0, foreground: true);
@@ -278,8 +280,6 @@ public sealed class CoreBehaviorTests
         var bottomRight = Window(3, new RectI(945, 531, 950, 532), 2);
         var options = new TidyOptions(
             SmartStrength: SmartTidyStrength.Assertive,
-            SmartHitTendency: SmartHitTendency.Sensitive,
-            SmartSizeTendency: SmartSizeTendency.Expand,
             RescueOffscreenWindows: true);
 
         var plan = new TidyEngine().CreatePlan(
