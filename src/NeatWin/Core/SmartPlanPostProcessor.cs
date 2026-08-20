@@ -1,10 +1,8 @@
 namespace NeatWin.Core;
 
 /// <summary>
-/// Applies user-facing Smart behavior preferences after the constraint solver has produced its
-/// cosmetic plan. This layer deliberately contains only high-level behaviors that are easier to
-/// express as a projection than as another public solver coefficient: reversible vertical fill
-/// preference and overlap separation.
+/// Applies only explicit Smart refinements after the minimum-displacement solver. These behaviors
+/// are intentionally conservative so they cannot turn a small cleanup into a second layout pass.
 /// </summary>
 public static class SmartPlanPostProcessor
 {
@@ -59,23 +57,11 @@ public static class SmartPlanPostProcessor
 
     private static void ApplyVerticalFillPreference(List<State> states, TidyOptions options)
     {
-        var minimumHeightRatio = options.SmartStrength switch
+        var profile = options.SmartStrength switch
         {
-            SmartTidyStrength.Gentle => 0.84,
-            SmartTidyStrength.Assertive => 0.62,
-            _ => 0.72,
-        };
-        var edgeRadius = options.SmartHitTendency switch
-        {
-            SmartHitTendency.Cautious => 56,
-            SmartHitTendency.Sensitive => 156,
-            _ => 104,
-        };
-        var maximumGrowthRatio = options.SmartSizeTendency switch
-        {
-            SmartSizeTendency.Preserve => 0.08,
-            SmartSizeTendency.Expand => 0.34,
-            _ => 0.20,
+            SmartTidyStrength.Gentle => new VerticalFillProfile(0.92, 18, 0.06),
+            SmartTidyStrength.Assertive => new VerticalFillProfile(0.78, 44, 0.16),
+            _ => new VerticalFillProfile(0.86, 28, 0.10),
         };
 
         foreach (var state in states)
@@ -99,24 +85,26 @@ public static class SmartPlanPostProcessor
             }
 
             var heightRatio = (double)current.Height / workArea.Height;
-            if (heightRatio < minimumHeightRatio)
+            if (heightRatio < profile.MinimumHeightRatio)
             {
                 continue;
             }
 
             var topDistance = Math.Abs(current.Top - workArea.Top);
             var bottomDistance = Math.Abs(workArea.Bottom - current.Bottom);
-            var bothEdgesPlausible = topDistance <= edgeRadius && bottomDistance <= edgeRadius;
+            var bothEdgesPlausible =
+                topDistance <= profile.EdgeRadius &&
+                bottomDistance <= profile.EdgeRadius;
             var oneEdgeStrong =
-                (topDistance <= edgeRadius / 2 || bottomDistance <= edgeRadius / 2) &&
-                Math.Max(topDistance, bottomDistance) <= edgeRadius * 1.5;
+                (topDistance <= profile.EdgeRadius / 2 || bottomDistance <= profile.EdgeRadius / 2) &&
+                Math.Max(topDistance, bottomDistance) <= profile.EdgeRadius * 1.35;
             if (!bothEdgesPlausible && !oneEdgeStrong)
             {
                 continue;
             }
 
             var growthRatio = Math.Max(0, (double)(workArea.Height - current.Height) / current.Height);
-            if (growthRatio > maximumGrowthRatio)
+            if (growthRatio > profile.MaximumGrowthRatio)
             {
                 continue;
             }
@@ -156,7 +144,7 @@ public static class SmartPlanPostProcessor
                 state.Original.Bottom,
                 other.Original.Top,
                 other.Original.Bottom);
-            var peerRadius = Math.Max(72, state.Snapshot.WorkArea.Height / 9);
+            var peerRadius = Math.Max(36, state.Snapshot.WorkArea.Height / 24);
             if (state.Original.VerticalOverlapRatio(other.Original) > 0 || verticalGap <= peerRadius)
             {
                 return true;
@@ -176,18 +164,20 @@ public static class SmartPlanPostProcessor
             return;
         }
 
+        // The level is retained for old settings/API compatibility. The UI uses Balanced. Even the
+        // strongest legacy profile now treats deep pre-existing overlap as likely intentional.
         var profile = level switch
         {
-            SmartOverlapAvoidance.Gentle => new OverlapProfile(0.16, 3, 96),
-            SmartOverlapAvoidance.Strong => new OverlapProfile(1.00, 12, 520),
-            _ => new OverlapProfile(0.72, 8, 280),
+            SmartOverlapAvoidance.Gentle => new OverlapProfile(0.08, 2, 48),
+            SmartOverlapAvoidance.Strong => new OverlapProfile(0.55, 6, 160),
+            _ => new OverlapProfile(0.22, 3, 96),
         };
 
         var strengthBudget = options.SmartStrength switch
         {
-            SmartTidyStrength.Gentle => 64,
-            SmartTidyStrength.Assertive => 144,
-            _ => 96,
+            SmartTidyStrength.Gentle => 48,
+            SmartTidyStrength.Assertive => 104,
+            _ => 72,
         };
         var movementBudget = Math.Max(strengthBudget, profile.MinimumMovementBudget);
 
@@ -201,17 +191,23 @@ public static class SmartPlanPostProcessor
                 {
                     var a = states[i];
                     var b = states[j];
-                    var overlapX = Math.Min(a.Current.Right, b.Current.Right) - Math.Max(a.Current.Left, b.Current.Left);
-                    var overlapY = Math.Min(a.Current.Bottom, b.Current.Bottom) - Math.Max(a.Current.Top, b.Current.Top);
-                    if (overlapX <= 0 || overlapY <= 0)
+
+                    // Classify intent from the user's original arrangement, not from geometry that
+                    // earlier Smart stages have already modified. Deep original overlap often means
+                    // deliberate stacking and should not be "fixed" automatically.
+                    var originalSmallerArea = Math.Min(a.Original.Area, b.Original.Area);
+                    var originalOverlapArea = a.Original.Intersect(b.Original).Area;
+                    var originalOverlapRatio = originalSmallerArea <= 0
+                        ? 0
+                        : (double)originalOverlapArea / originalSmallerArea;
+                    if (originalOverlapRatio > profile.MaximumOverlapAreaRatio)
                     {
                         continue;
                     }
 
-                    var smallerArea = Math.Min(a.Current.Area, b.Current.Area);
-                    var overlapArea = (long)overlapX * overlapY;
-                    var overlapRatio = smallerArea <= 0 ? 0 : (double)overlapArea / smallerArea;
-                    if (overlapRatio > profile.MaximumOverlapAreaRatio)
+                    var overlapX = Math.Min(a.Current.Right, b.Current.Right) - Math.Max(a.Current.Left, b.Current.Left);
+                    var overlapY = Math.Min(a.Current.Bottom, b.Current.Bottom) - Math.Max(a.Current.Top, b.Current.Top);
+                    if (overlapX <= 0 || overlapY <= 0)
                     {
                         continue;
                     }
@@ -280,9 +276,6 @@ public static class SmartPlanPostProcessor
         var horizontalCapacity = GetHorizontalSeparationCapacity(a, b, movementBudget, keepInsideWorkArea);
         var verticalCapacity = GetVerticalSeparationCapacity(a, b, movementBudget, keepInsideWorkArea);
 
-        // Structural intent wins while that axis still has useful travel. This is what keeps an
-        // A | (B over C) arrangement as a left column plus right stack instead of pushing B/C apart
-        // horizontally and destroying the user's apparent topology.
         if (columnEvidence > rowEvidence + 0.15 && verticalCapacity > 0)
         {
             return SeparationAxis.Vertical;
@@ -605,6 +598,11 @@ public static class SmartPlanPostProcessor
         Horizontal,
         Vertical,
     }
+
+    private readonly record struct VerticalFillProfile(
+        double MinimumHeightRatio,
+        int EdgeRadius,
+        double MaximumGrowthRatio);
 
     private readonly record struct OverlapProfile(
         double MaximumOverlapAreaRatio,
