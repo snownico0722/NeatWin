@@ -4,182 +4,178 @@ namespace NeatWin.App;
 
 internal sealed class TidyOptionsEditor : UserControl
 {
-    private readonly GroupBox _smartGroup;
-    private readonly ComboBox _smartStrength;
-    private readonly CheckBox _preferReversibleVerticalFill;
-    private readonly CheckBox _removeVideoBlackBars;
-    private readonly ComboBox _videoBlackBarTendency;
-    private readonly GroupBox _classicGroup;
+    private readonly ModernCard _smartCard;
+    private readonly SegmentedSelector<SmartTidyStrength> _smartStrength;
+    private readonly ModernToggle _preferReversibleVerticalFill;
+    private readonly ModernToggle _removeVideoBlackBars;
+    private readonly SegmentedSelector<VideoBlackBarTendency> _videoBlackBarTendency;
+    private readonly Control _videoTendencyRow;
+    private readonly ModernCard _classicCard;
     private readonly NumericUpDown _neighborSnap;
     private readonly NumericUpDown _alignmentSnap;
     private readonly NumericUpDown _screenSnap;
     private readonly NumericUpDown _maximumAdjustment;
     private readonly NumericUpDown _maximumResizePercent;
     private readonly NumericUpDown _passes;
-    private readonly CheckBox _rescueOffscreen;
+    private readonly ModernToggle _rescueOffscreen;
     private readonly Label _statusLabel;
     private TidyOptions _currentOptions;
     private SmartBehaviorOptions _currentBehaviorOptions;
+    private bool _suppressControlEvents;
 
     internal TidyOptionsEditor(TidyOptions initialOptions, SmartBehaviorOptions initialBehaviorOptions)
     {
         _currentOptions = initialOptions;
         _currentBehaviorOptions = initialBehaviorOptions;
         Dock = DockStyle.Fill;
-        Padding = new Padding(8);
+        Padding = new Padding(0, 4, 0, 0);
         AutoScroll = true;
+        BackColor = UiTheme.Page;
+        ForeColor = UiTheme.Text;
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 3,
+            ColumnCount = 1,
             RowCount = 5,
+            BackColor = UiTheme.Page,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         Controls.Add(root);
 
-        _smartGroup = new GroupBox
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Text = "Smart 偏好",
-            Padding = new Padding(10),
-        };
-        root.SetColumnSpan(_smartGroup, 3);
-        root.Controls.Add(_smartGroup, 0, 0);
+        _smartCard = new ModernCard { Dock = DockStyle.Top };
+        root.Controls.Add(_smartCard, 0, 0);
 
-        var smartLayout = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 3,
-            RowCount = 4,
-        };
-        smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
-        smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
-        smartLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 36));
-        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        smartLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        _smartGroup.Controls.Add(smartLayout);
+        var smartLayout = CreateSettingsLayout(5);
+        _smartCard.Controls.Add(smartLayout);
+        AddCardTitle(smartLayout, 0, "Smart");
 
-        _smartStrength = AddChoiceRow(
+        _smartStrength = new SegmentedSelector<SmartTidyStrength>(
+            new SegmentOption<SmartTidyStrength>(SmartTidyStrength.Gentle, "保守"),
+            new SegmentOption<SmartTidyStrength>(SmartTidyStrength.Balanced, "平衡"),
+            new SegmentOption<SmartTidyStrength>(SmartTidyStrength.Assertive, "积极"))
+        {
+            Width = 226,
+            Anchor = AnchorStyles.Right,
+        };
+        AddSettingRow(
             smartLayout,
-            0,
+            1,
             "整理倾向",
-            "只微调整体保守程度，不单独暴露内部权重",
-            new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Gentle, "保守"),
-            new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Balanced, "平衡"),
-            new ChoiceOption<SmartTidyStrength>(SmartTidyStrength.Assertive, "积极"));
+            "整体控制识别范围、移动幅度和尺寸变化",
+            _smartStrength);
 
-        _preferReversibleVerticalFill = new CheckBox
-        {
-            AutoSize = true,
-            Text = "优先可逆纵向填满",
-            Anchor = AnchorStyles.Left,
-        };
-        smartLayout.SetColumnSpan(_preferReversibleVerticalFill, 3);
-        smartLayout.Controls.Add(_preferReversibleVerticalFill, 0, 1);
+        _preferReversibleVerticalFill = new ModernToggle { Anchor = AnchorStyles.Right };
+        AddSettingRow(
+            smartLayout,
+            2,
+            "可逆纵向填满",
+            "合适时贴满上下；拖动标题栏后恢复原尺寸",
+            _preferReversibleVerticalFill);
 
-        _removeVideoBlackBars = new CheckBox
-        {
-            AutoSize = true,
-            Text = "视频去黑边",
-            Anchor = AnchorStyles.Left,
-        };
-        smartLayout.SetColumnSpan(_removeVideoBlackBars, 3);
-        smartLayout.Controls.Add(_removeVideoBlackBars, 0, 2);
-
-        _videoBlackBarTendency = AddChoiceRow(
+        _removeVideoBlackBars = new ModernToggle { Anchor = AnchorStyles.Right };
+        AddSettingRow(
             smartLayout,
             3,
-            "视频调整倾向",
-            "只决定无黑边解更偏向缩小还是放大",
-            new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Shrink, "缩小优先"),
-            new ChoiceOption<VideoBlackBarTendency>(VideoBlackBarTendency.Expand, "放大优先"));
-        _removeVideoBlackBars.CheckedChanged += (_, _) =>
-            _videoBlackBarTendency.Enabled = _removeVideoBlackBars.Checked;
+            "视频去黑边",
+            "只调整浏览器窗口比例，不裁视频内容",
+            _removeVideoBlackBars);
 
-        _classicGroup = new GroupBox
+        _videoBlackBarTendency = new SegmentedSelector<VideoBlackBarTendency>(
+            new SegmentOption<VideoBlackBarTendency>(VideoBlackBarTendency.Shrink, "缩小优先"),
+            new SegmentOption<VideoBlackBarTendency>(VideoBlackBarTendency.Expand, "放大优先"))
         {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Text = "Classic 阈值参数",
-            Padding = new Padding(10),
+            Width = 226,
+            Anchor = AnchorStyles.Right,
         };
-        root.SetColumnSpan(_classicGroup, 3);
-        root.Controls.Add(_classicGroup, 0, 1);
+        _videoTendencyRow = AddSettingRow(
+            smartLayout,
+            4,
+            "视频尺寸倾向",
+            "两种方案都会先满足无黑边，再选择更偏好的尺寸",
+            _videoBlackBarTendency);
 
-        var classicLayout = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 3,
-            RowCount = 6,
-        };
-        classicLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
-        classicLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-        classicLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-        for (var row = 0; row < 6; row++)
-        {
-            classicLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        }
-        _classicGroup.Controls.Add(classicLayout);
+        _classicCard = new ModernCard { Dock = DockStyle.Top };
+        root.Controls.Add(_classicCard, 0, 1);
 
-        _neighborSnap = AddNumberRow(classicLayout, 0, "邻近吸合范围", 0, 240, "px", 0, 4);
-        _alignmentSnap = AddNumberRow(classicLayout, 1, "边缘对齐范围", 0, 120, "px", 0, 2);
-        _screenSnap = AddNumberRow(classicLayout, 2, "贴屏边范围", 0, 240, "px", 0, 4);
-        _maximumAdjustment = AddNumberRow(classicLayout, 3, "最大单边调整", 0, 480, "px", 0, 8);
-        _maximumResizePercent = AddNumberRow(classicLayout, 4, "最大尺寸变化", 0, 50, "%", 0, 1);
-        _passes = AddNumberRow(classicLayout, 5, "迭代轮数", 1, 5, "轮", 0, 1);
+        var classicLayout = CreateSettingsLayout(7);
+        _classicCard.Controls.Add(classicLayout);
+        AddCardTitle(classicLayout, 0, "Classic 阈值规则");
 
-        _rescueOffscreen = new CheckBox
-        {
-            AutoSize = true,
-            Text = "把部分出屏、但当前确实可见的窗口拉回工作区",
-            Anchor = AnchorStyles.Left,
-        };
-        root.SetColumnSpan(_rescueOffscreen, 3);
-        root.Controls.Add(_rescueOffscreen, 0, 2);
+        _neighborSnap = AddNumericRow(classicLayout, 1, "邻近吸合", "窗口多近时视为相邻", 0, 240, "px", 4);
+        _alignmentSnap = AddNumericRow(classicLayout, 2, "边缘对齐", "边缘多近时进行对齐", 0, 120, "px", 2);
+        _screenSnap = AddNumericRow(classicLayout, 3, "贴屏边", "距离屏幕边缘的吸附范围", 0, 240, "px", 4);
+        _maximumAdjustment = AddNumericRow(classicLayout, 4, "最大调整", "单条边一次最多改动多少", 0, 480, "px", 8);
+        _maximumResizePercent = AddNumericRow(classicLayout, 5, "最大尺寸变化", "限制单次整理改变窗口尺寸", 0, 50, "%", 1);
+        _passes = AddNumericRow(classicLayout, 6, "迭代轮数", "Classic 规则重复执行次数", 1, 5, "轮", 1);
 
-        var buttons = new FlowLayoutPanel
+        var safetyCard = new ModernCard { Dock = DockStyle.Top };
+        root.Controls.Add(safetyCard, 0, 2);
+        var safetyLayout = CreateSettingsLayout(2);
+        safetyCard.Controls.Add(safetyLayout);
+        AddCardTitle(safetyLayout, 0, "窗口保护");
+        _rescueOffscreen = new ModernToggle { Anchor = AnchorStyles.Right };
+        AddSettingRow(
+            safetyLayout,
+            1,
+            "拉回部分出屏窗口",
+            "只处理当前确实可见、但有一部分越过工作区的窗口",
+            _rescueOffscreen);
+
+        var actions = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.RightToLeft,
             WrapContents = false,
+            BackColor = UiTheme.Page,
+            Margin = new Padding(0, 0, 0, 0),
         };
-        var apply = new Button { Text = "保存并应用", AutoSize = true };
-        apply.Click += (_, _) => ApplyFromControls();
-        var reset = new Button { Text = "恢复默认", AutoSize = true };
-        reset.Click += (_, _) => SetControls(
-            new TidyOptions(AlgorithmMode: _currentOptions.AlgorithmMode),
-            new SmartBehaviorOptions());
-        buttons.Controls.Add(apply);
-        buttons.Controls.Add(reset);
-        root.SetColumnSpan(buttons, 3);
-        root.Controls.Add(buttons, 0, 3);
+        var reset = new Button
+        {
+            Text = "恢复默认",
+            AutoSize = true,
+            Padding = new Padding(8, 2, 8, 2),
+            Margin = new Padding(0, 2, 0, 2),
+        };
+        UiTheme.StyleSecondary(reset);
+        reset.Click += (_, _) => ResetDefaults();
+        actions.Controls.Add(reset);
+        root.Controls.Add(actions, 0, 3);
 
         _statusLabel = new Label
         {
             Dock = DockStyle.Fill,
-            ForeColor = SystemColors.GrayText,
+            ForeColor = UiTheme.Danger,
             Text = string.Empty,
-            TextAlign = ContentAlignment.TopLeft,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI", 8.5F),
+            Margin = new Padding(2, 0, 0, 0),
         };
-        root.SetColumnSpan(_statusLabel, 3);
         root.Controls.Add(_statusLabel, 0, 4);
+
+        _smartStrength.ValueChanged += (_, _) => ApplyFromControls();
+        _preferReversibleVerticalFill.CheckedChanged += (_, _) => ApplyFromControls();
+        _removeVideoBlackBars.CheckedChanged += (_, _) =>
+        {
+            UpdateVideoTendencyVisibility();
+            ApplyFromControls();
+        };
+        _videoBlackBarTendency.ValueChanged += (_, _) => ApplyFromControls();
+        _neighborSnap.ValueChanged += (_, _) => ApplyFromControls();
+        _alignmentSnap.ValueChanged += (_, _) => ApplyFromControls();
+        _screenSnap.ValueChanged += (_, _) => ApplyFromControls();
+        _maximumAdjustment.ValueChanged += (_, _) => ApplyFromControls();
+        _maximumResizePercent.ValueChanged += (_, _) => ApplyFromControls();
+        _passes.ValueChanged += (_, _) => ApplyFromControls();
+        _rescueOffscreen.CheckedChanged += (_, _) => ApplyFromControls();
 
         SetControls(initialOptions, initialBehaviorOptions);
     }
@@ -195,8 +191,7 @@ internal sealed class TidyOptionsEditor : UserControl
         _currentOptions = activeOptions;
         _currentBehaviorOptions = activeBehaviorOptions;
         SetControls(activeOptions, activeBehaviorOptions);
-        _statusLabel.Text = message;
-        _statusLabel.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
+        _statusLabel.Text = success ? string.Empty : message;
     }
 
     internal void ChangeAlgorithmMode(TidyAlgorithmMode mode)
@@ -209,13 +204,16 @@ internal sealed class TidyOptionsEditor : UserControl
 
         _currentOptions = _currentOptions with { AlgorithmMode = mode };
         UpdateModeVisibility();
-        OptionsChangeRequested?.Invoke(
-            this,
-            new TidyOptionsChangeEventArgs(_currentOptions, _currentBehaviorOptions));
+        ApplyFromControls();
     }
 
     private void ApplyFromControls()
     {
+        if (_suppressControlEvents)
+        {
+            return;
+        }
+
         var mode = _currentOptions.AlgorithmMode;
         var options = _currentOptions with
         {
@@ -227,8 +225,7 @@ internal sealed class TidyOptionsEditor : UserControl
         {
             options = options with
             {
-                SmartStrength = SelectedValue(_smartStrength, SmartTidyStrength.Balanced),
-                // Legacy split Smart knobs stay neutral and are ignored by the unified resolver.
+                SmartStrength = _smartStrength.Value,
                 SmartHitTendency = SmartHitTendency.Balanced,
                 SmartSizeTendency = SmartSizeTendency.Balanced,
             };
@@ -237,7 +234,7 @@ internal sealed class TidyOptionsEditor : UserControl
                 OverlapAvoidance = SmartOverlapAvoidance.Balanced,
                 PreferReversibleVerticalFill = _preferReversibleVerticalFill.Checked,
                 RemoveVideoBlackBars = _removeVideoBlackBars.Checked,
-                VideoBlackBarTendency = SelectedValue(_videoBlackBarTendency, VideoBlackBarTendency.Shrink),
+                VideoBlackBarTendency = _videoBlackBarTendency.Value,
             };
         }
         else
@@ -253,140 +250,208 @@ internal sealed class TidyOptionsEditor : UserControl
             };
         }
 
+        _currentOptions = options;
+        _currentBehaviorOptions = behaviorOptions;
+        _statusLabel.Text = string.Empty;
         OptionsChangeRequested?.Invoke(this, new TidyOptionsChangeEventArgs(options, behaviorOptions));
+    }
+
+    private void ResetDefaults()
+    {
+        var options = new TidyOptions(AlgorithmMode: _currentOptions.AlgorithmMode);
+        var behavior = new SmartBehaviorOptions();
+        SetControls(options, behavior);
+        ApplyFromControls();
     }
 
     private void SetControls(TidyOptions options, SmartBehaviorOptions behaviorOptions)
     {
-        SelectChoice(_smartStrength, options.SmartStrength);
-        _preferReversibleVerticalFill.Checked = behaviorOptions.PreferReversibleVerticalFill;
-        _removeVideoBlackBars.Checked = behaviorOptions.RemoveVideoBlackBars;
-        SelectChoice(_videoBlackBarTendency, behaviorOptions.VideoBlackBarTendency);
-        _videoBlackBarTendency.Enabled = behaviorOptions.RemoveVideoBlackBars;
+        _suppressControlEvents = true;
+        try
+        {
+            _smartStrength.SetValue(options.SmartStrength, raiseEvent: false);
+            _preferReversibleVerticalFill.Checked = behaviorOptions.PreferReversibleVerticalFill;
+            _removeVideoBlackBars.Checked = behaviorOptions.RemoveVideoBlackBars;
+            _videoBlackBarTendency.SetValue(behaviorOptions.VideoBlackBarTendency, raiseEvent: false);
 
-        _neighborSnap.Value = ClampToDecimal(options.NeighborSnapDistance, _neighborSnap.Minimum, _neighborSnap.Maximum);
-        _alignmentSnap.Value = ClampToDecimal(options.AlignmentSnapDistance, _alignmentSnap.Minimum, _alignmentSnap.Maximum);
-        _screenSnap.Value = ClampToDecimal(options.ScreenSnapDistance, _screenSnap.Minimum, _screenSnap.Maximum);
-        _maximumAdjustment.Value = ClampToDecimal(options.MaximumEdgeAdjustment, _maximumAdjustment.Minimum, _maximumAdjustment.Maximum);
-        _maximumResizePercent.Value = ClampToDecimal(
-            (decimal)(options.MaximumSizeChangeRatio * 100),
-            _maximumResizePercent.Minimum,
-            _maximumResizePercent.Maximum);
-        _passes.Value = ClampToDecimal(options.Passes, _passes.Minimum, _passes.Maximum);
-        _rescueOffscreen.Checked = options.RescueOffscreenWindows;
+            _neighborSnap.Value = ClampToDecimal(options.NeighborSnapDistance, _neighborSnap.Minimum, _neighborSnap.Maximum);
+            _alignmentSnap.Value = ClampToDecimal(options.AlignmentSnapDistance, _alignmentSnap.Minimum, _alignmentSnap.Maximum);
+            _screenSnap.Value = ClampToDecimal(options.ScreenSnapDistance, _screenSnap.Minimum, _screenSnap.Maximum);
+            _maximumAdjustment.Value = ClampToDecimal(options.MaximumEdgeAdjustment, _maximumAdjustment.Minimum, _maximumAdjustment.Maximum);
+            _maximumResizePercent.Value = ClampToDecimal(
+                (decimal)(options.MaximumSizeChangeRatio * 100),
+                _maximumResizePercent.Minimum,
+                _maximumResizePercent.Maximum);
+            _passes.Value = ClampToDecimal(options.Passes, _passes.Minimum, _passes.Maximum);
+            _rescueOffscreen.Checked = options.RescueOffscreenWindows;
+        }
+        finally
+        {
+            _suppressControlEvents = false;
+        }
+
+        UpdateVideoTendencyVisibility();
         UpdateModeVisibility();
     }
 
     private void UpdateModeVisibility()
     {
         var smart = _currentOptions.AlgorithmMode == TidyAlgorithmMode.Smart;
-        _smartGroup.Visible = smart;
-        _classicGroup.Visible = !smart;
+        _smartCard.Visible = smart;
+        _classicCard.Visible = !smart;
     }
 
-    private static ComboBox AddChoiceRow<T>(
-        TableLayoutPanel root,
-        int row,
-        string labelText,
-        string explanation,
-        params ChoiceOption<T>[] choices)
-        where T : struct, Enum
+    private void UpdateVideoTendencyVisibility()
     {
-        root.Controls.Add(new Label
+        _videoTendencyRow.Visible = _removeVideoBlackBars.Checked;
+    }
+
+    private static TableLayoutPanel CreateSettingsLayout(int rows)
+    {
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = rows,
+            BackColor = UiTheme.Surface,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        for (var row = 1; row < rows; row++)
+        {
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        }
+        return layout;
+    }
+
+    private static void AddCardTitle(TableLayoutPanel root, int row, string text)
+    {
+        var label = new Label
         {
             AutoSize = true,
-            Text = labelText,
+            Text = text,
+            Font = UiTheme.Semibold(10F),
+            ForeColor = UiTheme.Text,
             Anchor = AnchorStyles.Left,
-        }, 0, row);
+            Margin = new Padding(0, 0, 0, 6),
+        };
+        root.SetColumnSpan(label, 2);
+        root.Controls.Add(label, 0, row);
+    }
 
-        var combo = new ComboBox
+    private static Control AddSettingRow(
+        TableLayoutPanel root,
+        int row,
+        string title,
+        string description,
+        Control editor)
+    {
+        var textHost = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Margin = new Padding(4),
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = UiTheme.Surface,
+            Margin = new Padding(0, 5, 12, 5),
         };
-        combo.Items.AddRange(choices.Cast<object>().ToArray());
-        root.Controls.Add(combo, 1, row);
-
-        root.Controls.Add(new Label
+        textHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        textHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        textHost.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = explanation,
-            ForeColor = SystemColors.GrayText,
-            Anchor = AnchorStyles.Left,
-        }, 2, row);
+            Text = title,
+            Font = UiTheme.Semibold(9F),
+            ForeColor = UiTheme.Text,
+            Margin = new Padding(0, 0, 0, 2),
+        }, 0, 0);
+        textHost.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = description,
+            ForeColor = UiTheme.TextMuted,
+            Font = new Font("Segoe UI", 8.25F),
+            Margin = new Padding(0),
+        }, 0, 1);
+        root.Controls.Add(textHost, 0, row);
 
-        return combo;
+        var editorHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            BackColor = UiTheme.Surface,
+            Margin = new Padding(0, 5, 0, 5),
+            MinimumSize = new Size(0, 42),
+        };
+        editor.Anchor = AnchorStyles.Right;
+        editor.Location = new Point(Math.Max(0, 232 - editor.Width), 7);
+        editorHost.Controls.Add(editor);
+        editorHost.Resize += (_, _) =>
+        {
+            editor.Left = Math.Max(0, editorHost.ClientSize.Width - editor.Width);
+            editor.Top = Math.Max(0, (editorHost.ClientSize.Height - editor.Height) / 2);
+        };
+        root.Controls.Add(editorHost, 1, row);
+
+        var rowHost = new Panel { Visible = true };
+        rowHost.VisibleChanged += (_, _) =>
+        {
+            textHost.Visible = rowHost.Visible;
+            editorHost.Visible = rowHost.Visible;
+        };
+        return rowHost;
     }
 
-    private static NumericUpDown AddNumberRow(
+    private static NumericUpDown AddNumericRow(
         TableLayoutPanel root,
         int row,
-        string labelText,
+        string title,
+        string description,
         decimal minimum,
         decimal maximum,
         string unit,
-        int decimalPlaces,
         decimal increment)
     {
-        root.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = labelText,
-            Anchor = AnchorStyles.Left,
-        }, 0, row);
-
         var value = new NumericUpDown
         {
             Minimum = minimum,
             Maximum = maximum,
-            DecimalPlaces = decimalPlaces,
             Increment = increment,
-            ThousandsSeparator = false,
-            Dock = DockStyle.Fill,
-            Margin = new Padding(4),
+            DecimalPlaces = 0,
+            Width = 104,
+            Height = 28,
+            TextAlign = HorizontalAlignment.Right,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = UiTheme.Surface,
+            ForeColor = UiTheme.Text,
         };
-        root.Controls.Add(value, 1, row);
 
-        root.Controls.Add(new Label
+        var editor = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            BackColor = UiTheme.Surface,
+        };
+        editor.Controls.Add(value);
+        editor.Controls.Add(new Label
         {
             AutoSize = true,
             Text = unit,
-            ForeColor = SystemColors.GrayText,
-            Anchor = AnchorStyles.Left,
-        }, 2, row);
+            ForeColor = UiTheme.TextMuted,
+            Margin = new Padding(6, 6, 0, 0),
+        });
+        AddSettingRow(root, row, title, description, editor);
         return value;
-    }
-
-    private static T SelectedValue<T>(ComboBox combo, T fallback)
-        where T : struct, Enum
-    {
-        return combo.SelectedItem is ChoiceOption<T> option ? option.Value : fallback;
-    }
-
-    private static void SelectChoice<T>(ComboBox combo, T value)
-        where T : struct, Enum
-    {
-        for (var index = 0; index < combo.Items.Count; index++)
-        {
-            if (combo.Items[index] is ChoiceOption<T> option && EqualityComparer<T>.Default.Equals(option.Value, value))
-            {
-                combo.SelectedIndex = index;
-                return;
-            }
-        }
-
-        combo.SelectedIndex = combo.Items.Count > 0 ? 0 : -1;
     }
 
     private static decimal ClampToDecimal(decimal value, decimal minimum, decimal maximum) =>
         Math.Min(maximum, Math.Max(minimum, value));
-
-    private sealed record ChoiceOption<T>(T Value, string Name)
-        where T : struct, Enum
-    {
-        public override string ToString() => Name;
-    }
 }
 
 internal sealed class TidyOptionsChangeEventArgs(
