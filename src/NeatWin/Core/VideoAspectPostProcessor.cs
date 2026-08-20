@@ -15,8 +15,8 @@ public sealed record VideoBlackBarHint(
 
 /// <summary>
 /// Applies a high-confidence video-content aspect hint to one browser window without touching the
-/// browser/player itself. The selected tendency is a preference: an expansion that would create
-/// materially more overlap may fall back to shrinking instead.
+/// browser/player itself. Zero black-bar geometry outranks generic Smart screen usage for that
+/// browser; the resize tendency only chooses between aspect-correct solutions.
 /// </summary>
 public static class VideoAspectPostProcessor
 {
@@ -55,17 +55,22 @@ public static class VideoAspectPostProcessor
         var targetByHandle = basePlan.ToDictionary(
             move => move.Window.Handle,
             move => move.TargetVisualRect);
-        var current = targetByHandle.TryGetValue(snapshot.Handle, out var planned)
-            ? planned
+        var planned = targetByHandle.TryGetValue(snapshot.Handle, out var genericSmartTarget)
+            ? genericSmartTarget
             : original;
 
+        // Important priority rule: video geometry is solved from the user's current browser size,
+        // not from a generic Smart target that may already have expanded or vertically filled it.
+        // This prevents screen-utilization preferences from inflating the browser before aspect
+        // correction and makes "no black bars" the actual objective.
+        var geometryBaseline = original;
         var chromeX = Math.Max(0, original.Width - hint.ViewportVisualRect.Width);
         var chromeY = Math.Max(0, original.Height - hint.ViewportVisualRect.Height);
-        var viewportWidth = Math.Max(1, current.Width - chromeX);
-        var viewportHeight = Math.Max(1, current.Height - chromeY);
+        var viewportWidth = Math.Max(1, geometryBaseline.Width - chromeX);
+        var viewportHeight = Math.Max(1, geometryBaseline.Height - chromeY);
 
         var target = TryBuildTarget(
-            current,
+            geometryBaseline,
             snapshot.WorkArea,
             viewportWidth,
             viewportHeight,
@@ -81,18 +86,19 @@ public static class VideoAspectPostProcessor
                 visibleWindows,
                 targetByHandle,
                 snapshot.Handle,
-                current,
+                planned,
                 target.Value))
         {
             target = null;
         }
 
-        // "Expand" is deliberately a tendency, not a command. If the larger aspect-correct window
-        // would collide with the existing layout, use the smaller aspect-correct solution instead.
+        // Expand is only a tie-break preference among aspect-correct solutions. It is never a
+        // request to occupy more of the monitor. If exact expansion conflicts with the layout,
+        // choose the exact shrink solution instead.
         if (target is null && behaviorOptions.VideoBlackBarTendency == VideoBlackBarTendency.Expand)
         {
             target = TryBuildTarget(
-                current,
+                geometryBaseline,
                 snapshot.WorkArea,
                 viewportWidth,
                 viewportHeight,
@@ -108,14 +114,21 @@ public static class VideoAspectPostProcessor
                     visibleWindows,
                     targetByHandle,
                     snapshot.Handle,
-                    current,
+                    planned,
                     target.Value))
             {
                 target = null;
             }
         }
 
-        if (target is null || !HasMeaningfulChange(current, target.Value))
+        if (target is null)
+        {
+            return basePlan;
+        }
+
+        // Even when the aspect-correct target is close to the current geometry, it still owns this
+        // browser's final rectangle: generic Smart filling must not replace it afterward.
+        if (!HasMeaningfulChange(original, target.Value) && !HasMeaningfulChange(planned, target.Value))
         {
             return basePlan;
         }
