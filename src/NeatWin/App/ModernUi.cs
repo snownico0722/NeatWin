@@ -1,0 +1,247 @@
+using System.Drawing.Drawing2D;
+
+namespace NeatWin.App;
+
+internal static class UiTheme
+{
+    internal static readonly Color Page = Color.FromArgb(246, 247, 249);
+    internal static readonly Color Surface = Color.White;
+    internal static readonly Color SurfaceMuted = Color.FromArgb(241, 243, 246);
+    internal static readonly Color Border = Color.FromArgb(224, 228, 234);
+    internal static readonly Color Text = Color.FromArgb(28, 32, 38);
+    internal static readonly Color TextMuted = Color.FromArgb(105, 113, 124);
+    internal static readonly Color Accent = Color.FromArgb(47, 111, 235);
+    internal static readonly Color AccentHover = Color.FromArgb(38, 94, 205);
+    internal static readonly Color Danger = Color.FromArgb(190, 55, 55);
+
+    internal static Font Semibold(float size) => new("Segoe UI Semibold", size, FontStyle.Regular);
+
+    internal static void StylePrimary(Button button)
+    {
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.BackColor = Accent;
+        button.ForeColor = Color.White;
+        button.Font = Semibold(button.Font.Size + 0.5F);
+        button.Cursor = Cursors.Hand;
+        button.UseVisualStyleBackColor = false;
+        button.FlatAppearance.MouseOverBackColor = AccentHover;
+        button.FlatAppearance.MouseDownBackColor = AccentHover;
+    }
+
+    internal static void StyleSecondary(Button button)
+    {
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderColor = Border;
+        button.FlatAppearance.BorderSize = 1;
+        button.BackColor = Surface;
+        button.ForeColor = Text;
+        button.Cursor = Cursors.Hand;
+        button.UseVisualStyleBackColor = false;
+        button.FlatAppearance.MouseOverBackColor = SurfaceMuted;
+        button.FlatAppearance.MouseDownBackColor = SurfaceMuted;
+    }
+
+    internal static void StyleCombo(ComboBox combo)
+    {
+        combo.FlatStyle = FlatStyle.Flat;
+        combo.BackColor = Surface;
+        combo.ForeColor = Text;
+    }
+
+    internal static void StyleChip(CheckBox chip)
+    {
+        chip.Appearance = Appearance.Button;
+        chip.AutoSize = false;
+        chip.TextAlign = ContentAlignment.MiddleCenter;
+        chip.FlatStyle = FlatStyle.Flat;
+        chip.FlatAppearance.BorderSize = 1;
+        chip.FlatAppearance.BorderColor = Border;
+        chip.BackColor = Surface;
+        chip.ForeColor = TextMuted;
+        chip.Cursor = Cursors.Hand;
+        chip.UseVisualStyleBackColor = false;
+        chip.CheckedChanged += (_, _) =>
+        {
+            chip.BackColor = chip.Checked ? Color.FromArgb(232, 240, 255) : Surface;
+            chip.ForeColor = chip.Checked ? Accent : TextMuted;
+            chip.FlatAppearance.BorderColor = chip.Checked ? Color.FromArgb(164, 190, 245) : Border;
+        };
+    }
+}
+
+internal sealed class ModernCard : Panel
+{
+    internal ModernCard()
+    {
+        BackColor = UiTheme.Surface;
+        Padding = new Padding(16);
+        Margin = new Padding(0, 0, 0, 12);
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using var pen = new Pen(UiTheme.Border);
+        var rect = ClientRectangle;
+        if (rect.Width > 0 && rect.Height > 0)
+        {
+            e.Graphics.DrawRectangle(pen, 0, 0, rect.Width - 1, rect.Height - 1);
+        }
+    }
+}
+
+internal sealed class ModernToggle : CheckBox
+{
+    internal ModernToggle()
+    {
+        AutoSize = false;
+        Size = new Size(42, 22);
+        Text = string.Empty;
+        Cursor = Cursors.Hand;
+        SetStyle(
+            ControlStyles.UserPaint |
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer,
+            true);
+    }
+
+    protected override void OnCheckedChanged(EventArgs e)
+    {
+        base.OnCheckedChanged(e);
+        Invalidate();
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        base.OnEnabledChanged(e);
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.Clear(Parent?.BackColor ?? UiTheme.Surface);
+
+        var track = new Rectangle(1, 2, Width - 2, Height - 4);
+        var trackColor = !Enabled
+            ? Color.FromArgb(218, 221, 226)
+            : Checked ? UiTheme.Accent : Color.FromArgb(194, 199, 207);
+        using (var trackBrush = new SolidBrush(trackColor))
+        using (var trackPath = RoundedRect(track, track.Height / 2F))
+        {
+            e.Graphics.FillPath(trackBrush, trackPath);
+        }
+
+        var knobSize = Height - 8;
+        var knobX = Checked ? Width - knobSize - 4 : 4;
+        var knob = new Rectangle(knobX, 4, knobSize, knobSize);
+        using var knobBrush = new SolidBrush(Color.White);
+        e.Graphics.FillEllipse(knobBrush, knob);
+    }
+
+    private static GraphicsPath RoundedRect(Rectangle rect, float radius)
+    {
+        var diameter = radius * 2;
+        var path = new GraphicsPath();
+        path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+}
+
+internal sealed class SegmentedSelector<T> : UserControl
+    where T : struct, Enum
+{
+    private readonly TableLayoutPanel _layout;
+    private readonly List<(T Value, Button Button)> _items = new();
+    private T _value;
+    private bool _hasValue;
+
+    internal SegmentedSelector(params SegmentOption<T>[] options)
+    {
+        Height = 34;
+        MinimumSize = new Size(120, 34);
+        BackColor = UiTheme.SurfaceMuted;
+        Padding = new Padding(2);
+
+        _layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = Math.Max(1, options.Length),
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = UiTheme.SurfaceMuted,
+        };
+        Controls.Add(_layout);
+
+        foreach (var option in options)
+        {
+            _layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F / Math.Max(1, options.Length)));
+            var button = new Button
+            {
+                Dock = DockStyle.Fill,
+                Text = option.Name,
+                Margin = new Padding(0),
+                FlatStyle = FlatStyle.Flat,
+                Font = UiTheme.Semibold(8.5F),
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false,
+            };
+            button.FlatAppearance.BorderSize = 0;
+            button.Click += (_, _) => SetValue(option.Value, raiseEvent: true);
+            _items.Add((option.Value, button));
+            _layout.Controls.Add(button, _items.Count - 1, 0);
+        }
+
+        if (options.Length > 0)
+        {
+            SetValue(options[0].Value, raiseEvent: false);
+        }
+    }
+
+    internal event EventHandler? ValueChanged;
+
+    internal T Value
+    {
+        get => _value;
+        set => SetValue(value, raiseEvent: false);
+    }
+
+    internal void SetValue(T value, bool raiseEvent)
+    {
+        if (_hasValue && EqualityComparer<T>.Default.Equals(_value, value))
+        {
+            UpdateVisuals();
+            return;
+        }
+
+        _value = value;
+        _hasValue = true;
+        UpdateVisuals();
+        if (raiseEvent)
+        {
+            ValueChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void UpdateVisuals()
+    {
+        foreach (var item in _items)
+        {
+            var selected = _hasValue && EqualityComparer<T>.Default.Equals(item.Value, _value);
+            item.Button.BackColor = selected ? UiTheme.Surface : UiTheme.SurfaceMuted;
+            item.Button.ForeColor = selected ? UiTheme.Accent : UiTheme.TextMuted;
+        }
+    }
+}
+
+internal readonly record struct SegmentOption<T>(T Value, string Name)
+    where T : struct, Enum;
