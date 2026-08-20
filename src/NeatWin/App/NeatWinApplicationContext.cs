@@ -11,6 +11,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly VisibilityAnalyzer _visibilityAnalyzer = new();
     private readonly TidyEngine _tidyEngine = new();
     private readonly SettingsStore _settingsStore = new();
+    private readonly BrowserVideoBlackBarDetector _videoBlackBarDetector = new();
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly MainWindow _mainWindow;
@@ -195,6 +196,14 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         {
             var snapshot = _windowManager.Capture();
             var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
+
+            VideoBlackBarHint? videoHint = null;
+            if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
+                _smartBehaviorOptions.RemoveVideoBlackBars)
+            {
+                videoHint = _videoBlackBarDetector.TryDetect(visibleWorkingSet);
+            }
+
             IReadOnlyList<TidyMove> plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
 
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
@@ -204,6 +213,32 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                     plan,
                     _tidyOptions,
                     _smartBehaviorOptions);
+
+                var beforeVideoPlan = plan;
+                plan = VideoAspectPostProcessor.Refine(
+                    visibleWorkingSet,
+                    plan,
+                    _tidyOptions,
+                    _smartBehaviorOptions,
+                    videoHint);
+
+                if (videoHint is not null)
+                {
+                    var browser = visibleWorkingSet.FirstOrDefault(item => item.Window.Handle == videoHint.WindowHandle);
+                    if (browser is not null)
+                    {
+                        var before = beforeVideoPlan
+                            .FirstOrDefault(move => move.Window.Handle == videoHint.WindowHandle)?.TargetVisualRect ??
+                            browser.Window.VisualRect;
+                        var after = plan
+                            .FirstOrDefault(move => move.Window.Handle == videoHint.WindowHandle)?.TargetVisualRect ??
+                            browser.Window.VisualRect;
+                        if (before != after)
+                        {
+                            _videoBlackBarDetector.RecordApplied(videoHint.WindowHandle, after);
+                        }
+                    }
+                }
             }
 
             _verticalFillManager.Track(
