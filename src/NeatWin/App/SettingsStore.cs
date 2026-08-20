@@ -31,6 +31,8 @@ internal sealed class SettingsStore
             settings.Win);
     }
 
+    internal bool LoadAutoTidyEnabled() => LoadStoredSettings().AutoTidyEnabled ?? false;
+
     internal TidyOptions LoadTidyOptions()
     {
         var stored = LoadStoredSettings();
@@ -40,11 +42,14 @@ internal sealed class SettingsStore
         {
             AlgorithmMode = ReadEnum(stored.AlgorithmMode, defaults.AlgorithmMode),
             SmartStrength = ReadEnum(stored.SmartStrength, defaults.SmartStrength),
-            SmartHitTendency = ReadEnum(stored.SmartHitTendency, defaults.SmartHitTendency),
-            SmartSizeTendency = ReadEnum(stored.SmartSizeTendency, defaults.SmartSizeTendency),
 
-            // Raw solver fields are retained for Classic mode and for backward-compatible
-            // settings files. Smart mode derives its internal values from the intent profiles.
+            // Old split Smart controls stay serialized for backward compatibility, but they are
+            // deliberately neutralized. Smart now has one coherent overall tendency.
+            SmartHitTendency = SmartHitTendency.Balanced,
+            SmartSizeTendency = SmartSizeTendency.Balanced,
+
+            // Raw solver fields remain meaningful for Classic and for old settings files. Smart
+            // resolves all of these internally from SmartStrength before solving.
             PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
             ResizeResistanceWeight = Math.Clamp(stored.ResizeResistanceWeight ?? defaults.ResizeResistanceWeight, 0.0, 5.0),
             OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
@@ -67,7 +72,10 @@ internal sealed class SettingsStore
         return defaults with
         {
             PreferReversibleVerticalFill = stored.PreferReversibleVerticalFill ?? defaults.PreferReversibleVerticalFill,
-            OverlapAvoidance = ReadEnum(stored.SmartOverlapAvoidance, defaults.OverlapAvoidance),
+            // Overlap avoidance is a core safety policy now, not a separate user-tunable algorithm.
+            OverlapAvoidance = SmartOverlapAvoidance.Balanced,
+            RemoveVideoBlackBars = stored.RemoveVideoBlackBars ?? defaults.RemoveVideoBlackBars,
+            VideoBlackBarTendency = ReadEnum(stored.VideoBlackBarTendency, defaults.VideoBlackBarTendency),
         };
     }
 
@@ -82,13 +90,20 @@ internal sealed class SettingsStore
         WriteStoredSettings(settings);
     }
 
+    internal void SaveAutoTidyEnabled(bool enabled)
+    {
+        var settings = LoadStoredSettings();
+        settings.AutoTidyEnabled = enabled;
+        WriteStoredSettings(settings);
+    }
+
     internal void SaveTidyOptions(TidyOptions options)
     {
         var settings = LoadStoredSettings();
         settings.AlgorithmMode = (int)options.AlgorithmMode;
         settings.SmartStrength = (int)options.SmartStrength;
-        settings.SmartHitTendency = (int)options.SmartHitTendency;
-        settings.SmartSizeTendency = (int)options.SmartSizeTendency;
+        settings.SmartHitTendency = (int)SmartHitTendency.Balanced;
+        settings.SmartSizeTendency = (int)SmartSizeTendency.Balanced;
 
         settings.PreserveLayoutWeight = options.PreserveLayoutWeight;
         settings.ResizeResistanceWeight = options.ResizeResistanceWeight;
@@ -109,7 +124,9 @@ internal sealed class SettingsStore
     {
         var settings = LoadStoredSettings();
         settings.PreferReversibleVerticalFill = options.PreferReversibleVerticalFill;
-        settings.SmartOverlapAvoidance = (int)options.OverlapAvoidance;
+        settings.SmartOverlapAvoidance = (int)SmartOverlapAvoidance.Balanced;
+        settings.RemoveVideoBlackBars = options.RemoveVideoBlackBars;
+        settings.VideoBlackBarTendency = (int)options.VideoBlackBarTendency;
         WriteStoredSettings(settings);
     }
 
@@ -158,6 +175,7 @@ internal sealed class SettingsStore
         public bool Alt { get; set; }
         public bool Shift { get; set; }
         public bool Win { get; set; }
+        public bool? AutoTidyEnabled { get; set; }
 
         public int? AlgorithmMode { get; set; }
         public int? SmartStrength { get; set; }
@@ -165,6 +183,8 @@ internal sealed class SettingsStore
         public int? SmartSizeTendency { get; set; }
         public int? SmartOverlapAvoidance { get; set; }
         public bool? PreferReversibleVerticalFill { get; set; }
+        public bool? RemoveVideoBlackBars { get; set; }
+        public int? VideoBlackBarTendency { get; set; }
 
         public double? PreserveLayoutWeight { get; set; }
         public double? ResizeResistanceWeight { get; set; }
@@ -189,6 +209,7 @@ internal sealed class SettingsStore
                 Alt = hotkey.Alt,
                 Shift = hotkey.Shift,
                 Win = hotkey.Win,
+                AutoTidyEnabled = false,
             };
         }
     }

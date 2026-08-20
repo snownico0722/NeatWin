@@ -11,12 +11,16 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly VisibilityAnalyzer _visibilityAnalyzer = new();
     private readonly TidyEngine _tidyEngine = new();
     private readonly SettingsStore _settingsStore = new();
+    private readonly BrowserVideoBlackBarDetector _videoBlackBarDetector = new();
     private readonly NotifyIcon _trayIcon;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly MainWindow _mainWindow;
     private readonly ReversibleVerticalFillManager _verticalFillManager;
+    private readonly AutoTidyManager _autoTidyManager;
     private TidyOptions _tidyOptions;
     private SmartBehaviorOptions _smartBehaviorOptions;
+    private bool _autoTidyEnabled;
+    private bool _tidyRunning;
 
     public NeatWinApplicationContext()
     {
@@ -24,14 +28,23 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _tidyOptions = _settingsStore.LoadTidyOptions();
         _smartBehaviorOptions = _settingsStore.LoadSmartBehaviorOptions();
         _verticalFillManager = new ReversibleVerticalFillManager();
+        _autoTidyManager = new AutoTidyManager();
+        _autoTidyEnabled = _settingsStore.LoadAutoTidyEnabled() && _autoTidyManager.IsAvailable;
+        _autoTidyManager.Enabled = _autoTidyEnabled;
+        _autoTidyManager.TidyRequested += OnAutoTidyRequested;
 
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += RunTidy;
 
-        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions);
+        _mainWindow = new MainWindow(
+            requestedHotkey,
+            _tidyOptions,
+            _smartBehaviorOptions,
+            _autoTidyEnabled);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
         _mainWindow.HotkeyChangeRequested += OnHotkeyChangeRequested;
         _mainWindow.TidyOptionsChangeRequested += OnTidyOptionsChangeRequested;
+        _mainWindow.AutoTidyChangeRequested += OnAutoTidyChangeRequested;
         _mainWindow.ExitRequested += (_, _) => ExitThread();
 
         var menu = new ContextMenuStrip();
@@ -57,7 +70,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         else
         {
             _mainWindow.SetHotkeyRegistration(requestedHotkey, success: false, hotkeyMessage);
-            _mainWindow.SetActivity("程序已运行；快捷键不可用时仍可点击“整理当前可见窗口”。", error: true);
         }
 
         _mainWindow.Show();
@@ -68,7 +80,9 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         if (disposing)
         {
             _hotkeyWindow.HotkeyPressed -= RunTidy;
+            _autoTidyManager.TidyRequested -= OnAutoTidyRequested;
             _hotkeyWindow.Dispose();
+            _autoTidyManager.Dispose();
             _verticalFillManager.Dispose();
             _mainWindow.Dispose();
             _trayIcon.Visible = false;
@@ -101,7 +115,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             }
 
             _mainWindow.SetHotkeyRegistration(requested, success: true, message);
-            _mainWindow.SetActivity($"快捷键已改为 {requested}。鼠标按钮仍然随时可用。");
+            _mainWindow.SetActivity($"快捷键已改为 {requested}。");
             UpdateTrayText(requested);
             return;
         }
@@ -123,8 +137,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 _tidyOptions,
                 _smartBehaviorOptions,
                 success: true,
-                "整理设置已保存并立即生效。");
-            _mainWindow.SetActivity("整理设置已更新；下一次整理会使用新偏好。");
+                string.Empty);
         }
         catch (Exception exception)
         {
@@ -136,12 +149,60 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         }
     }
 
-    private void RunTidy()
+    private void OnAutoTidyChangeRequested(object? sender, AutoTidyChangeEventArgs eventArgs)
     {
+        if (eventArgs.Enabled && !_autoTidyManager.IsAvailable)
+        {
+            _autoTidyEnabled = false;
+            _autoTidyManager.Enabled = false;
+            _mainWindow.SetAutoTidyEnabled(false);
+            _mainWindow.SetActivity("自动整理监听不可用。", error: true);
+            return;
+        }
+
+        _autoTidyEnabled = eventArgs.Enabled;
+        _autoTidyManager.Enabled = _autoTidyEnabled;
+
+        try
+        {
+            _settingsStore.SaveAutoTidyEnabled(_autoTidyEnabled);
+        }
+        catch (Exception exception)
+        {
+            _mainWindow.SetActivity($"自动整理已在本次运行中生效，但保存失败：{exception.Message}", error: true);
+        }
+    }
+
+    private void OnAutoTidyRequested()
+    {
+        if (_autoTidyEnabled)
+        {
+            RunTidy(showActivity: false);
+        }
+    }
+
+    private void RunTidy() => RunTidy(showActivity: true);
+
+    private void RunTidy(bool showActivity)
+    {
+        if (_tidyRunning)
+        {
+            return;
+        }
+
+        _tidyRunning = true;
         try
         {
             var snapshot = _windowManager.Capture();
             var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
+
+            VideoBlackBarHint? videoHint = null;
+            if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
+                _smartBehaviorOptions.RemoveVideoBlackBars)
+            {
+                videoHint = _videoBlackBarDetector.TryDetect(visibleWorkingSet);
+            }
+
             IReadOnlyList<TidyMove> plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
 
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
@@ -151,18 +212,52 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                     plan,
                     _tidyOptions,
                     _smartBehaviorOptions);
+
+                var beforeVideoPlan = plan;
+                plan = VideoAspectPostProcessor.Refine(
+                    visibleWorkingSet,
+                    plan,
+                    _tidyOptions,
+                    _smartBehaviorOptions,
+                    videoHint);
+
+                if (videoHint is not null)
+                {
+                    var browser = visibleWorkingSet.FirstOrDefault(item => item.Window.Handle == videoHint.WindowHandle);
+                    if (browser is not null)
+                    {
+                        var before = beforeVideoPlan
+                            .FirstOrDefault(move => move.Window.Handle == videoHint.WindowHandle)?.TargetVisualRect ??
+                            browser.Window.VisualRect;
+                        var after = plan
+                            .FirstOrDefault(move => move.Window.Handle == videoHint.WindowHandle)?.TargetVisualRect ??
+                            browser.Window.VisualRect;
+                        if (before != after)
+                        {
+                            _videoBlackBarDetector.RecordApplied(videoHint.WindowHandle, after);
+                        }
+                    }
+                }
             }
 
             _verticalFillManager.Track(
                 plan,
                 _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
                 _smartBehaviorOptions.PreferReversibleVerticalFill);
-            _windowManager.Apply(plan);
 
-            var message = plan.Count == 0
-                ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，没有需要微调的地方。"
-                : $"整理完成：检查 {visibleWorkingSet.Count} 个当前可见窗口，调整 {plan.Count} 个。";
-            _mainWindow.SetActivity(message);
+            if (plan.Count > 0)
+            {
+                _autoTidyManager.SuppressFor(650);
+                _windowManager.Apply(plan);
+            }
+
+            if (showActivity)
+            {
+                var message = plan.Count == 0
+                    ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，没有需要微调的地方。"
+                    : $"整理完成：检查 {visibleWorkingSet.Count} 个当前可见窗口，调整 {plan.Count} 个。";
+                _mainWindow.SetActivity(message);
+            }
         }
         catch (Exception exception)
         {
@@ -172,6 +267,10 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 "NeatWin",
                 exception.Message,
                 ToolTipIcon.Error);
+        }
+        finally
+        {
+            _tidyRunning = false;
         }
     }
 

@@ -21,12 +21,22 @@ internal static class NativeMethods
     internal const uint SwpNoOwnerZOrder = 0x0200;
     internal const uint SwpAsyncWindowPos = 0x4000;
     internal const int WmHotkey = 0x0312;
+    internal const int WmLButtonDown = 0x0201;
+    internal const uint WmNcHitTest = 0x0084;
+    internal const int HtNowhere = 0;
+    internal const int HtClient = 1;
+    internal const int HtCaption = 2;
+    internal const int WhMouseLl = 14;
+    internal const int HcAction = 0;
+    internal const uint SmtoBlock = 0x0001;
+    internal const uint SmtoAbortIfHung = 0x0002;
     internal const uint ModAlt = 0x0001;
     internal const uint ModControl = 0x0002;
     internal const uint ModShift = 0x0004;
     internal const uint ModWin = 0x0008;
     internal const uint ModNoRepeat = 0x4000;
     internal const uint EventSystemMoveSizeStart = 0x000A;
+    internal const uint EventSystemMoveSizeEnd = 0x000B;
     internal const uint WinEventOutOfContext = 0x0000;
     internal const uint WinEventSkipOwnProcess = 0x0002;
     internal static readonly nint HwndMessage = new(-3);
@@ -40,6 +50,7 @@ internal static class NativeMethods
         int idChild,
         uint eventThread,
         uint eventTime);
+    internal delegate nint LowLevelMouseProc(int code, nint message, nint dataPointer);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -65,9 +76,20 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern nint GetWindow(nint hwnd, uint command);
 
+    [DllImport("user32.dll")]
+    internal static extern nint WindowFromPoint(Point point);
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetWindowRect(nint hwnd, out Rect rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetClientRect(nint hwnd, out Rect rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ClientToScreen(nint hwnd, ref Point point);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -129,6 +151,24 @@ internal static class NativeMethods
         uint flags);
 
     [DllImport("user32.dll", SetLastError = true)]
+    internal static extern nint SendMessageTimeout(
+        nint hwnd,
+        uint message,
+        nint wParam,
+        nint lParam,
+        uint flags,
+        uint timeout,
+        out nuint result);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PostMessage(
+        nint hwnd,
+        uint message,
+        nint wParam,
+        nint lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool RegisterHotKey(nint hwnd, int id, uint modifiers, uint virtualKey);
 
@@ -149,6 +189,24 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool UnhookWinEvent(nint hook);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern nint SetWindowsHookEx(
+        int hookType,
+        LowLevelMouseProc callback,
+        nint module,
+        uint threadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnhookWindowsHookEx(nint hook);
+
+    [DllImport("user32.dll")]
+    internal static extern nint CallNextHookEx(
+        nint hook,
+        int code,
+        nint message,
+        nint dataPointer);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
     private static extern int GetWindowLong32(nint hwnd, int index);
@@ -182,6 +240,16 @@ internal static class NativeMethods
     {
         internal int X;
         internal int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MsllHookStruct
+    {
+        internal Point Point;
+        internal uint MouseData;
+        internal uint Flags;
+        internal uint Time;
+        internal nuint ExtraInfo;
     }
 
     [StructLayout(LayoutKind.Sequential)]
