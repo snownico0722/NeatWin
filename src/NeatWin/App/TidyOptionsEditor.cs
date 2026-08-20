@@ -28,7 +28,7 @@ internal sealed class TidyOptionsEditor : UserControl
         _currentOptions = initialOptions;
         _currentBehaviorOptions = initialBehaviorOptions;
         Dock = DockStyle.Fill;
-        Padding = new Padding(0, 4, 0, 0);
+        Padding = new Padding(0, 8, 0, 0);
         AutoScroll = true;
         BackColor = UiTheme.Page;
         ForeColor = UiTheme.Text;
@@ -47,8 +47,8 @@ internal sealed class TidyOptionsEditor : UserControl
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         Controls.Add(root);
 
         _smartCard = new ModernCard { Dock = DockStyle.Top };
@@ -56,21 +56,21 @@ internal sealed class TidyOptionsEditor : UserControl
 
         var smartLayout = CreateSettingsLayout(5);
         _smartCard.Controls.Add(smartLayout);
-        AddCardTitle(smartLayout, 0, "Smart");
+        AddCardTitle(smartLayout, 0, "Smart 设置");
 
         _smartStrength = new SegmentedSelector<SmartTidyStrength>(
             new SegmentOption<SmartTidyStrength>(SmartTidyStrength.Gentle, "保守"),
             new SegmentOption<SmartTidyStrength>(SmartTidyStrength.Balanced, "平衡"),
             new SegmentOption<SmartTidyStrength>(SmartTidyStrength.Assertive, "积极"))
         {
-            Width = 226,
+            Width = 240,
             Anchor = AnchorStyles.Right,
         };
         AddSettingRow(
             smartLayout,
             1,
             "整理倾向",
-            "整体控制识别范围、移动幅度和尺寸变化",
+            "控制整体整理幅度",
             _smartStrength);
 
         _preferReversibleVerticalFill = new ModernToggle { Anchor = AnchorStyles.Right };
@@ -78,7 +78,7 @@ internal sealed class TidyOptionsEditor : UserControl
             smartLayout,
             2,
             "可逆纵向填满",
-            "合适时贴满上下；拖动标题栏后恢复原尺寸",
+            "接近全高时贴满上下，拖动即可恢复",
             _preferReversibleVerticalFill);
 
         _removeVideoBlackBars = new ModernToggle { Anchor = AnchorStyles.Right };
@@ -86,21 +86,21 @@ internal sealed class TidyOptionsEditor : UserControl
             smartLayout,
             3,
             "视频去黑边",
-            "只调整浏览器窗口比例，不裁视频内容",
+            "调整浏览器窗口比例，不裁切画面",
             _removeVideoBlackBars);
 
         _videoBlackBarTendency = new SegmentedSelector<VideoBlackBarTendency>(
             new SegmentOption<VideoBlackBarTendency>(VideoBlackBarTendency.Shrink, "缩小优先"),
             new SegmentOption<VideoBlackBarTendency>(VideoBlackBarTendency.Expand, "放大优先"))
         {
-            Width = 226,
+            Width = 240,
             Anchor = AnchorStyles.Right,
         };
         _videoTendencyRow = AddSettingRow(
             smartLayout,
             4,
             "视频尺寸倾向",
-            "两种方案都会先满足无黑边，再选择更偏好的尺寸",
+            "先消除黑边，再决定缩小或放大",
             _videoBlackBarTendency);
 
         _classicCard = new ModernCard { Dock = DockStyle.Top };
@@ -108,14 +108,14 @@ internal sealed class TidyOptionsEditor : UserControl
 
         var classicLayout = CreateSettingsLayout(7);
         _classicCard.Controls.Add(classicLayout);
-        AddCardTitle(classicLayout, 0, "Classic 阈值规则");
+        AddCardTitle(classicLayout, 0, "Classic 设置");
 
-        _neighborSnap = AddNumericRow(classicLayout, 1, "邻近吸合", "窗口多近时视为相邻", 0, 240, "px", 4);
-        _alignmentSnap = AddNumericRow(classicLayout, 2, "边缘对齐", "边缘多近时进行对齐", 0, 120, "px", 2);
-        _screenSnap = AddNumericRow(classicLayout, 3, "贴屏边", "距离屏幕边缘的吸附范围", 0, 240, "px", 4);
-        _maximumAdjustment = AddNumericRow(classicLayout, 4, "最大调整", "单条边一次最多改动多少", 0, 480, "px", 8);
-        _maximumResizePercent = AddNumericRow(classicLayout, 5, "最大尺寸变化", "限制单次整理改变窗口尺寸", 0, 50, "%", 1);
-        _passes = AddNumericRow(classicLayout, 6, "迭代轮数", "Classic 规则重复执行次数", 1, 5, "轮", 1);
+        _neighborSnap = AddNumericRow(classicLayout, 1, "邻近吸合", "相邻窗口的识别距离", 0, 240, "px", 4);
+        _alignmentSnap = AddNumericRow(classicLayout, 2, "边缘对齐", "相近边缘的对齐距离", 0, 120, "px", 2);
+        _screenSnap = AddNumericRow(classicLayout, 3, "贴屏边", "屏幕边缘的吸附距离", 0, 240, "px", 4);
+        _maximumAdjustment = AddNumericRow(classicLayout, 4, "最大调整", "单条边允许的最大改动", 0, 480, "px", 8);
+        _maximumResizePercent = AddNumericRow(classicLayout, 5, "最大尺寸变化", "单次整理的尺寸变化上限", 0, 50, "%", 1);
+        _passes = AddNumericRow(classicLayout, 6, "迭代轮数", "Classic 规则重复次数", 1, 5, "轮", 1);
 
         var safetyCard = new ModernCard { Dock = DockStyle.Top };
         root.Controls.Add(safetyCard, 0, 2);
@@ -127,7 +127,7 @@ internal sealed class TidyOptionsEditor : UserControl
             safetyLayout,
             1,
             "拉回部分出屏窗口",
-            "只处理当前确实可见、但有一部分越过工作区的窗口",
+            "仅处理当前可见的部分出屏窗口",
             _rescueOffscreen);
 
         var actions = new FlowLayoutPanel
@@ -136,13 +136,13 @@ internal sealed class TidyOptionsEditor : UserControl
             FlowDirection = FlowDirection.RightToLeft,
             WrapContents = false,
             BackColor = UiTheme.Page,
-            Margin = new Padding(0, 0, 0, 0),
+            Margin = new Padding(0),
         };
         var reset = new Button
         {
             Text = "恢复默认",
             AutoSize = true,
-            Padding = new Padding(8, 2, 8, 2),
+            Padding = new Padding(10, 3, 10, 3),
             Margin = new Padding(0, 2, 0, 2),
         };
         UiTheme.StyleSecondary(reset);
@@ -156,7 +156,7 @@ internal sealed class TidyOptionsEditor : UserControl
             ForeColor = UiTheme.Danger,
             Text = string.Empty,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 8.5F),
+            Font = new Font("Segoe UI", 9F),
             Margin = new Padding(2, 0, 0, 0),
         };
         root.Controls.Add(_statusLabel, 0, 4);
@@ -320,8 +320,8 @@ internal sealed class TidyOptionsEditor : UserControl
             Padding = new Padding(0),
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
         for (var row = 1; row < rows; row++)
         {
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -335,10 +335,10 @@ internal sealed class TidyOptionsEditor : UserControl
         {
             AutoSize = true,
             Text = text,
-            Font = UiTheme.Semibold(10F),
+            Font = UiTheme.Semibold(11.5F),
             ForeColor = UiTheme.Text,
             Anchor = AnchorStyles.Left,
-            Margin = new Padding(0, 0, 0, 6),
+            Margin = new Padding(0, 0, 0, 8),
         };
         root.SetColumnSpan(label, 2);
         root.Controls.Add(label, 0, row);
@@ -358,7 +358,7 @@ internal sealed class TidyOptionsEditor : UserControl
             ColumnCount = 1,
             RowCount = 2,
             BackColor = UiTheme.Surface,
-            Margin = new Padding(0, 5, 12, 5),
+            Margin = new Padding(0, 8, 16, 8),
         };
         textHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         textHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -366,16 +366,16 @@ internal sealed class TidyOptionsEditor : UserControl
         {
             AutoSize = true,
             Text = title,
-            Font = UiTheme.Semibold(9F),
+            Font = UiTheme.Semibold(10F),
             ForeColor = UiTheme.Text,
-            Margin = new Padding(0, 0, 0, 2),
+            Margin = new Padding(0, 0, 0, 3),
         }, 0, 0);
         textHost.Controls.Add(new Label
         {
             AutoSize = true,
             Text = description,
             ForeColor = UiTheme.TextMuted,
-            Font = new Font("Segoe UI", 8.25F),
+            Font = new Font("Segoe UI", 9F),
             Margin = new Padding(0),
         }, 0, 1);
         root.Controls.Add(textHost, 0, row);
@@ -385,11 +385,11 @@ internal sealed class TidyOptionsEditor : UserControl
             Dock = DockStyle.Fill,
             AutoSize = true,
             BackColor = UiTheme.Surface,
-            Margin = new Padding(0, 5, 0, 5),
-            MinimumSize = new Size(0, 42),
+            Margin = new Padding(0, 8, 0, 8),
+            MinimumSize = new Size(0, 50),
         };
         editor.Anchor = AnchorStyles.Right;
-        editor.Location = new Point(Math.Max(0, 232 - editor.Width), 7);
+        editor.Location = new Point(Math.Max(0, 252 - editor.Width), 7);
         editorHost.Controls.Add(editor);
         editorHost.Resize += (_, _) =>
         {
@@ -423,12 +423,13 @@ internal sealed class TidyOptionsEditor : UserControl
             Maximum = maximum,
             Increment = increment,
             DecimalPlaces = 0,
-            Width = 104,
-            Height = 28,
+            Width = 112,
+            Height = 30,
             TextAlign = HorizontalAlignment.Right,
             BorderStyle = BorderStyle.FixedSingle,
             BackColor = UiTheme.Surface,
             ForeColor = UiTheme.Text,
+            Font = new Font("Segoe UI", 9.5F),
         };
 
         var editor = new FlowLayoutPanel
@@ -444,7 +445,8 @@ internal sealed class TidyOptionsEditor : UserControl
             AutoSize = true,
             Text = unit,
             ForeColor = UiTheme.TextMuted,
-            Margin = new Padding(6, 6, 0, 0),
+            Font = new Font("Segoe UI", 9F),
+            Margin = new Padding(7, 6, 0, 0),
         });
         AddSettingRow(root, row, title, description, editor);
         return value;
