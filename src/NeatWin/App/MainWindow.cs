@@ -31,25 +31,25 @@ internal sealed class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(700, 540);
-        Font = new Font("Segoe UI", 9F);
+        ClientSize = new Size(720, 580);
+        Font = new Font("Segoe UI", 9.5F);
         BackColor = UiTheme.Page;
         ForeColor = UiTheme.Text;
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(20, 18, 20, 16),
+            Padding = new Padding(22, 20, 22, 18),
             ColumnCount = 1,
             RowCount = 6,
             BackColor = UiTheme.Page,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         Controls.Add(root);
 
         var header = new TableLayoutPanel
@@ -77,8 +77,8 @@ internal sealed class MainWindow : Form
             new SegmentOption<TidyAlgorithmMode>(TidyAlgorithmMode.Smart, "Smart"),
             new SegmentOption<TidyAlgorithmMode>(TidyAlgorithmMode.Classic, "Classic"))
         {
-            Width = 188,
-            Margin = new Padding(0, 0, 14, 0),
+            Width = 200,
+            Margin = new Padding(0, 0, 16, 0),
         };
         _algorithmModeSelector.SetValue(initialOptions.AlgorithmMode, raiseEvent: false);
         headerActions.Controls.Add(_algorithmModeSelector);
@@ -88,15 +88,16 @@ internal sealed class MainWindow : Form
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = false,
-            Margin = new Padding(0, 5, 0, 0),
+            Margin = new Padding(0, 6, 0, 0),
             BackColor = UiTheme.Page,
         };
         autoHost.Controls.Add(new Label
         {
             AutoSize = true,
             Text = "自动",
-            ForeColor = UiTheme.TextMuted,
-            Margin = new Padding(0, 2, 8, 0),
+            ForeColor = UiTheme.Text,
+            Font = UiTheme.Semibold(9.5F),
+            Margin = new Padding(0, 2, 9, 0),
         });
         _autoTidyToggle = new ModernToggle
         {
@@ -113,7 +114,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             Text = "整理当前可见窗口",
-            Font = UiTheme.Semibold(11F),
+            Font = UiTheme.Semibold(12F),
             Margin = new Padding(0, 0, 0, 10),
         };
         UiTheme.StylePrimary(tidyButton);
@@ -126,7 +127,7 @@ internal sealed class MainWindow : Form
             Text = string.Empty,
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = UiTheme.TextMuted,
-            Font = new Font("Segoe UI", 8.5F),
+            Font = new Font("Segoe UI", 9F),
             Margin = new Padding(2, 0, 0, 0),
         };
         root.Controls.Add(_activityLabel, 0, 2);
@@ -135,7 +136,7 @@ internal sealed class MainWindow : Form
             new SegmentOption<MainSection>(MainSection.Settings, "整理设置"),
             new SegmentOption<MainSection>(MainSection.Hotkey, "快捷键"))
         {
-            Width = 220,
+            Width = 240,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 6),
         };
@@ -173,7 +174,7 @@ internal sealed class MainWindow : Form
         {
             Text = "退出",
             AutoSize = true,
-            Padding = new Padding(8, 2, 8, 2),
+            Padding = new Padding(10, 3, 10, 3),
         };
         UiTheme.StyleSecondary(exitButton);
         exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
@@ -281,7 +282,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             BackColor = UiTheme.Page,
-            Padding = new Padding(0, 4, 0, 0),
+            Padding = new Padding(0, 8, 0, 0),
         };
 
         var card = new ModernCard
@@ -298,16 +299,16 @@ internal sealed class MainWindow : Form
             RowCount = 3,
             BackColor = UiTheme.Surface,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         card.Controls.Add(layout);
 
         layout.Controls.Add(new Label
         {
             AutoSize = true,
             Text = "全局快捷键",
-            Font = UiTheme.Semibold(10F),
+            Font = UiTheme.Semibold(11.5F),
             ForeColor = UiTheme.Text,
             Anchor = AnchorStyles.Left,
         }, 0, 0);
@@ -320,13 +321,13 @@ internal sealed class MainWindow : Form
             BackColor = UiTheme.Surface,
             Margin = new Padding(0),
         };
-        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 58));
-        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 58));
-        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 58));
-        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 58));
-        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 12));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 14));
         hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88));
         layout.Controls.Add(hotkeyRow, 0, 1);
 
         _ctrlBox = CreateModifierChip("Ctrl");
@@ -342,7 +343,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Margin = new Padding(0, 8, 10, 8),
+            Margin = new Padding(0, 9, 12, 9),
         };
         UiTheme.StyleCombo(_keyBox);
         foreach (var option in BuildKeyOptions(initialBinding.Key))
@@ -355,7 +356,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             Text = "应用",
-            Margin = new Padding(0, 7, 0, 7),
+            Margin = new Padding(0, 8, 0, 8),
         };
         UiTheme.StyleSecondary(applyButton);
         applyButton.Click += (_, _) => ApplyHotkeyFromControls();
@@ -366,7 +367,7 @@ internal sealed class MainWindow : Form
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = UiTheme.TextMuted,
-            Font = new Font("Segoe UI", 8.5F),
+            Font = new Font("Segoe UI", 9F),
         };
         layout.Controls.Add(_hotkeyStatusLabel, 0, 2);
 
@@ -378,9 +379,9 @@ internal sealed class MainWindow : Form
         var chip = new CheckBox
         {
             Text = text,
-            Size = new Size(52, 30),
+            Size = new Size(56, 32),
             Anchor = AnchorStyles.Left,
-            Margin = new Padding(0, 7, 6, 7),
+            Margin = new Padding(0, 8, 6, 8),
         };
         UiTheme.StyleChip(chip);
         return chip;
