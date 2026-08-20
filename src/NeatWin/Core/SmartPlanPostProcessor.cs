@@ -170,7 +170,7 @@ public static class SmartPlanPostProcessor
         {
             SmartOverlapAvoidance.Gentle => new OverlapProfile(0.08, 2, 48),
             SmartOverlapAvoidance.Strong => new OverlapProfile(0.55, 6, 160),
-            _ => new OverlapProfile(0.22, 3, 96),
+            _ => new OverlapProfile(0.22, 3, 104),
         };
 
         var strengthBudget = options.SmartStrength switch
@@ -276,12 +276,15 @@ public static class SmartPlanPostProcessor
         var horizontalCapacity = GetHorizontalSeparationCapacity(a, b, movementBudget, keepInsideWorkArea);
         var verticalCapacity = GetVerticalSeparationCapacity(a, b, movementBudget, keepInsideWorkArea);
 
-        if (columnEvidence > rowEvidence + 0.15 && verticalCapacity > 0)
+        // Structural intent is inferred from the original layout and stays stable across passes.
+        // Once a pair is clearly a column or row, exhausting movement on that axis must not make a
+        // later pass flip axes and destroy the topology. A small residual overlap is preferable.
+        if (columnEvidence > rowEvidence + 0.15)
         {
             return SeparationAxis.Vertical;
         }
 
-        if (rowEvidence > columnEvidence + 0.15 && horizontalCapacity > 0)
+        if (rowEvidence > columnEvidence + 0.15)
         {
             return SeparationAxis.Horizontal;
         }
