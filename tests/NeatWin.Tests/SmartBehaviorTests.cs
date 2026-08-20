@@ -151,7 +151,7 @@ public sealed class SmartBehaviorTests
     }
 
     [Fact]
-    public void VideoBlackBars_ExpandTendency_GrowsOrthogonalDimensionWhenSpaceExists()
+    public void VideoBlackBars_ExpandTendency_GrowsOnlyEnoughToReachAspect()
     {
         var browser = Window(1, new RectI(100, 100, 1200, 800), 0);
         var hint = new VideoBlackBarHint(
@@ -173,6 +173,36 @@ public sealed class SmartBehaviorTests
         var target = TargetFor(plan, browser);
         Assert.Equal(1340, target.Width);
         Assert.Equal(browser.VisualRect.Height, target.Height);
+    }
+
+    [Fact]
+    public void VideoBlackBars_OverridesGenericFullHeightPlanInsteadOfExpandingFromIt()
+    {
+        var browser = Window(1, new RectI(100, 100, 1200, 800), 0);
+        var genericFullHeightPlan = new[]
+        {
+            new TidyMove(browser, new RectI(100, 0, 1200, 1080)),
+        };
+        var hint = new VideoBlackBarHint(
+            browser.Handle,
+            VideoBlackBarOrientation.Horizontal,
+            2.0,
+            new RectI(150, 190, 1100, 620),
+            0.95);
+
+        var plan = VideoAspectPostProcessor.Refine(
+            [Visible(browser)],
+            genericFullHeightPlan,
+            new TidyOptions(),
+            new SmartBehaviorOptions(
+                RemoveVideoBlackBars: true,
+                VideoBlackBarTendency: VideoBlackBarTendency.Expand),
+            hint);
+
+        var target = TargetFor(plan, browser);
+        Assert.Equal(1340, target.Width);
+        Assert.Equal(800, target.Height);
+        Assert.NotEqual(WorkArea.Height, target.Height);
     }
 
     [Fact]
