@@ -448,23 +448,31 @@ internal sealed class BrowserVideoBlackBarDetector
             return default;
         }
 
+        var median = PercentileFromHistogram(histogram, count, 0.50);
+        var p10 = PercentileFromHistogram(histogram, count, 0.10);
+        var p90 = PercentileFromHistogram(histogram, count, 0.90);
+
+        return new LineMetric(
+            dark / (double)count,
+            bright / (double)count,
+            median,
+            Math.Max(0, p90 - p10));
+    }
+
+    private static int PercentileFromHistogram(int[] histogram, int count, double percentile)
+    {
+        var target = Math.Clamp((int)Math.Ceiling(count * percentile), 1, count);
         var cumulative = 0;
-        var target = (count + 1) / 2;
-        var median = 0;
         for (var value = 0; value < histogram.Length; value++)
         {
             cumulative += histogram[value];
             if (cumulative >= target)
             {
-                median = value;
-                break;
+                return value;
             }
         }
 
-        return new LineMetric(
-            dark / (double)count,
-            bright / (double)count,
-            median);
+        return histogram.Length - 1;
     }
 
     private static SpanRange LongestDarkishSpan(int length, Func<int, int> lumaAt)
@@ -511,8 +519,7 @@ internal sealed class BrowserVideoBlackBarDetector
         foreach (var fraction in new[] { 0.22, 0.38, 0.50, 0.62, 0.78 })
         {
             var y = Math.Clamp(top + (int)Math.Round((bottom - top) * fraction), 0, frame.Height - 1);
-            var metric = MeasureRow(frame, y);
-            total += Math.Clamp((1 - metric.DarkFraction) + (metric.BrightFraction * 0.6), 0, 1);
+            total += InteriorLineSignal(MeasureRow(frame, y));
         }
         return total / 5.0;
     }
@@ -523,10 +530,23 @@ internal sealed class BrowserVideoBlackBarDetector
         foreach (var fraction in new[] { 0.22, 0.38, 0.50, 0.62, 0.78 })
         {
             var x = Math.Clamp(left + (int)Math.Round((right - left) * fraction), 0, frame.Width - 1);
-            var metric = MeasureColumn(frame, x);
-            total += Math.Clamp((1 - metric.DarkFraction) + (metric.BrightFraction * 0.6), 0, 1);
+            total += InteriorLineSignal(MeasureColumn(frame, x));
         }
         return total / 5.0;
+    }
+
+    private static double InteriorLineSignal(LineMetric metric)
+    {
+        var brightnessSignal = Math.Clamp(
+            (1 - metric.DarkFraction) + (metric.BrightFraction * 0.6),
+            0,
+            1);
+
+        // Dark movie scenes can still contain strong spatial information. Use the robust p90-p10
+        // luma spread as a second signal, so a textured dark frame is not mistaken for a blank or
+        // protected capture. Pure black/near-uniform frames still have almost no contrast and fail.
+        var contrastSignal = Math.Clamp((metric.ContrastLuma - 8) / 48.0, 0, 1) * 0.92;
+        return Math.Max(brightnessSignal, contrastSignal);
     }
 
     private static int Luma(FramePixels frame, int x, int y)
@@ -591,7 +611,11 @@ internal sealed class BrowserVideoBlackBarDetector
 
     private sealed record Attempt(RectI TargetVisualRect, long Tick);
     private sealed record FramePixels(int Width, int Height, int Stride, byte[] Bytes);
-    private readonly record struct LineMetric(double DarkFraction, double BrightFraction, int MedianLuma);
+    private readonly record struct LineMetric(
+        double DarkFraction,
+        double BrightFraction,
+        int MedianLuma,
+        int ContrastLuma);
     private readonly record struct IndexedMetric(int Index, LineMetric Metric);
     private readonly record struct DarkRun(int Start, int End)
     {
