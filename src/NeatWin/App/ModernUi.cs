@@ -7,7 +7,8 @@ internal static class UiTheme
     internal static readonly Color Page = Color.FromArgb(246, 247, 249);
     internal static readonly Color Surface = Color.White;
     internal static readonly Color SurfaceMuted = Color.FromArgb(237, 240, 244);
-    internal static readonly Color Border = Color.FromArgb(205, 211, 220);
+    internal static readonly Color Border = Color.FromArgb(198, 205, 215);
+    internal static readonly Color Divider = Color.FromArgb(220, 224, 230);
     internal static readonly Color Text = Color.FromArgb(18, 21, 25);
     internal static readonly Color TextMuted = Color.FromArgb(72, 79, 89);
     internal static readonly Color Accent = Color.FromArgb(43, 103, 222);
@@ -19,7 +20,8 @@ internal static class UiTheme
     internal static void StylePrimary(Button button)
     {
         button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = Color.FromArgb(31, 83, 185);
         button.BackColor = Accent;
         button.ForeColor = Color.White;
         button.Font = Semibold(Math.Max(10F, button.Font.Size + 0.5F));
@@ -71,6 +73,34 @@ internal static class UiTheme
             chip.FlatAppearance.BorderColor = chip.Checked ? Accent : Border;
         };
     }
+
+    internal static void EnableRowDividers(TableLayoutPanel layout, int firstRow = 1)
+    {
+        layout.CellPaint += (_, eventArgs) =>
+        {
+            if (eventArgs.Row < firstRow || eventArgs.Row >= layout.RowCount - 1)
+            {
+                return;
+            }
+
+            using var pen = new Pen(Divider);
+            var y = eventArgs.CellBounds.Bottom - 1;
+            eventArgs.Graphics.DrawLine(
+                pen,
+                eventArgs.CellBounds.Left,
+                y,
+                eventArgs.CellBounds.Right,
+                y);
+        };
+    }
+
+    internal static Panel CreateDivider() => new()
+    {
+        Dock = DockStyle.Fill,
+        Height = 1,
+        BackColor = Divider,
+        Margin = new Padding(0),
+    };
 }
 
 internal sealed class ModernCard : Panel
@@ -83,6 +113,15 @@ internal sealed class ModernCard : Panel
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+    }
+
+    protected override void OnControlAdded(ControlEventArgs e)
+    {
+        base.OnControlAdded(e);
+        if (e.Control is TableLayoutPanel layout)
+        {
+            UiTheme.EnableRowDividers(layout, firstRow: 1);
+        }
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -171,8 +210,8 @@ internal sealed class SegmentedSelector<T> : UserControl
     {
         Height = 38;
         MinimumSize = new Size(120, 38);
-        BackColor = UiTheme.SurfaceMuted;
-        Padding = new Padding(2);
+        BackColor = UiTheme.Border;
+        Padding = new Padding(1);
 
         _layout = new TableLayoutPanel
         {
@@ -180,7 +219,7 @@ internal sealed class SegmentedSelector<T> : UserControl
             ColumnCount = Math.Max(1, options.Length),
             RowCount = 1,
             Margin = new Padding(0),
-            Padding = new Padding(0),
+            Padding = new Padding(1),
             BackColor = UiTheme.SurfaceMuted,
         };
         Controls.Add(_layout);

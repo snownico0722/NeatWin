@@ -42,14 +42,8 @@ internal sealed class SettingsStore
         {
             AlgorithmMode = ReadEnum(stored.AlgorithmMode, defaults.AlgorithmMode),
             SmartStrength = ReadEnum(stored.SmartStrength, defaults.SmartStrength),
-
-            // Old split Smart controls stay serialized for backward compatibility, but they are
-            // deliberately neutralized. Smart now has one coherent overall tendency.
             SmartHitTendency = SmartHitTendency.Balanced,
             SmartSizeTendency = SmartSizeTendency.Balanced,
-
-            // Raw solver fields remain meaningful for Classic and for old settings files. Smart
-            // resolves all of these internally from SmartStrength before solving.
             PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
             ResizeResistanceWeight = Math.Clamp(stored.ResizeResistanceWeight ?? defaults.ResizeResistanceWeight, 0.0, 5.0),
             OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
@@ -72,11 +66,24 @@ internal sealed class SettingsStore
         return defaults with
         {
             PreferReversibleVerticalFill = stored.PreferReversibleVerticalFill ?? defaults.PreferReversibleVerticalFill,
-            // Overlap avoidance is a core safety policy now, not a separate user-tunable algorithm.
             OverlapAvoidance = SmartOverlapAvoidance.Balanced,
             RemoveVideoBlackBars = stored.RemoveVideoBlackBars ?? defaults.RemoveVideoBlackBars,
             VideoBlackBarTendency = ReadEnum(stored.VideoBlackBarTendency, defaults.VideoBlackBarTendency),
         };
+    }
+
+    internal SmartPersonalizationState LoadSmartPersonalization()
+    {
+        var stored = LoadStoredSettings();
+        var defaults = SmartPersonalizationState.Default;
+        return new SmartPersonalizationState(
+            stored.AutoFeatureWeights ?? defaults.AutoFeatureWeights,
+            stored.AutoArchetypeBias ?? defaults.AutoArchetypeBias,
+            stored.FollowTargetBias ?? defaults.FollowTargetBias,
+            stored.PreferredGapPixels ?? defaults.PreferredGapPixels,
+            stored.PreferredMainRatio ?? defaults.PreferredMainRatio,
+            stored.AutoCorrectionSamples ?? defaults.AutoCorrectionSamples,
+            stored.FollowGestureSamples ?? defaults.FollowGestureSamples).Normalize();
     }
 
     internal void SaveHotkey(HotkeyBinding binding)
@@ -104,7 +111,6 @@ internal sealed class SettingsStore
         settings.SmartStrength = (int)options.SmartStrength;
         settings.SmartHitTendency = (int)SmartHitTendency.Balanced;
         settings.SmartSizeTendency = (int)SmartSizeTendency.Balanced;
-
         settings.PreserveLayoutWeight = options.PreserveLayoutWeight;
         settings.ResizeResistanceWeight = options.ResizeResistanceWeight;
         settings.OrderlinessWeight = options.OrderlinessWeight;
@@ -127,6 +133,20 @@ internal sealed class SettingsStore
         settings.SmartOverlapAvoidance = (int)SmartOverlapAvoidance.Balanced;
         settings.RemoveVideoBlackBars = options.RemoveVideoBlackBars;
         settings.VideoBlackBarTendency = (int)options.VideoBlackBarTendency;
+        WriteStoredSettings(settings);
+    }
+
+    internal void SaveSmartPersonalization(SmartPersonalizationState state)
+    {
+        state = state.Normalize();
+        var settings = LoadStoredSettings();
+        settings.AutoFeatureWeights = state.AutoFeatureWeights;
+        settings.AutoArchetypeBias = state.AutoArchetypeBias;
+        settings.FollowTargetBias = state.FollowTargetBias;
+        settings.PreferredGapPixels = state.PreferredGapPixels;
+        settings.PreferredMainRatio = state.PreferredMainRatio;
+        settings.AutoCorrectionSamples = state.AutoCorrectionSamples;
+        settings.FollowGestureSamples = state.FollowGestureSamples;
         WriteStoredSettings(settings);
     }
 
@@ -198,6 +218,16 @@ internal sealed class SettingsStore
         public double? MaximumSizeChangeRatio { get; set; }
         public bool? RescueOffscreenWindows { get; set; }
         public int? Passes { get; set; }
+
+        // Personalized model state. These are geometry-only residual parameters; no window titles,
+        // process names, raw pointer history or screenshots are persisted.
+        public double[]? AutoFeatureWeights { get; set; }
+        public double[]? AutoArchetypeBias { get; set; }
+        public double[]? FollowTargetBias { get; set; }
+        public double? PreferredGapPixels { get; set; }
+        public double? PreferredMainRatio { get; set; }
+        public int? AutoCorrectionSamples { get; set; }
+        public int? FollowGestureSamples { get; set; }
 
         internal static StoredSettings CreateDefault()
         {
