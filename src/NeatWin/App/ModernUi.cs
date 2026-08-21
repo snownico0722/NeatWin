@@ -115,6 +115,15 @@ internal sealed class ModernCard : Panel
         SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
     }
 
+    protected override void OnControlAdded(ControlEventArgs e)
+    {
+        base.OnControlAdded(e);
+        if (e.Control is TableLayoutPanel layout)
+        {
+            UiTheme.EnableRowDividers(layout, firstRow: 1);
+        }
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
