@@ -343,7 +343,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 plan = smartResult.Moves;
                 autoLearning = smartResult.Learning;
 
-                plan = SmartPlanPostProcessor.Refine(
+                plan = HumanCenteredExplicitBehaviors.Refine(
                     visibleWorkingSet,
                     plan,
                     _tidyOptions,
