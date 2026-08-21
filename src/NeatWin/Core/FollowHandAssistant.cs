@@ -73,6 +73,14 @@ internal static class FollowHandAssistant
             }
 
             var correction = RectDistance(gesture.EndRect, candidate.Target);
+            // A relation already satisfied at mouse-up is context, not a possible next action. If
+            // zero-distance candidates remain in the competition they always look artificially
+            // attractive and can suppress another nearby relation the user actually meant to finish.
+            if (correction < 1.5)
+            {
+                continue;
+            }
+
             var proximity = Math.Clamp(1.0 - (correction / Math.Max(8.0, radius * 2.2)), 0, 1);
             var kinematic = KinematicIntentBonus(gesture, candidate.Target);
             var attentionPenalty = AttentionConflictPenalty(
@@ -131,9 +139,7 @@ internal static class FollowHandAssistant
             gesture.EndSpeedPixelsPerSecond <= 1500;
         var scoreAccepted = best.Score >= threshold ||
                             (learnedTargetSupport && best.Score >= threshold - 0.55);
-        var shouldApply = correctionDistance >= 1.5 &&
-                          correctionDistance <= maxCorrection &&
-                          scoreAccepted;
+        var shouldApply = correctionDistance <= maxCorrection && scoreAccepted;
         var confidence = Math.Clamp(
             ((best.Score - 0.7) / 2.2) + (learnedTargetSupport ? 0.12 : 0),
             0,
