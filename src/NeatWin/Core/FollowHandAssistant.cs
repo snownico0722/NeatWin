@@ -10,6 +10,7 @@ internal static class FollowHandAssistant
 {
     private const int MinimumWidth = 180;
     private const int MinimumHeight = 120;
+    private const double FlyThroughSpeedPixelsPerSecond = 3200.0;
 
     internal static FollowHandDecision Decide(
         ManualWindowGesture gesture,
@@ -21,6 +22,15 @@ internal static class FollowHandAssistant
         personalization = personalization.Normalize();
         var moved = visibleWindows.FirstOrDefault(item => item.Window.Handle == gesture.WindowHandle);
         if (moved is null || gesture.EndRect.IsEmpty)
+        {
+            return new FollowHandDecision(false, gesture.EndRect, FollowHandTargetKind.None, 0);
+        }
+
+        // A fast monitor-crossing fling is not an invitation to snap to every relation it crosses.
+        // The raw endpoint still reaches the learning path with reduced confidence, but behavior B
+        // stays out of the way for this gesture.
+        if (double.IsFinite(gesture.EndSpeedPixelsPerSecond) &&
+            gesture.EndSpeedPixelsPerSecond >= FlyThroughSpeedPixelsPerSecond)
         {
             return new FollowHandDecision(false, gesture.EndRect, FollowHandTargetKind.None, 0);
         }
@@ -72,6 +82,8 @@ internal static class FollowHandAssistant
                 interaction);
             var personalBias = SmartPersonalizationLearner.FollowBias(personalization, candidate.Kind);
 
+            candidate.PersonalBias = personalBias;
+            candidate.AttentionPenalty = attentionPenalty;
             candidate.Score =
                 candidate.BaseScore +
                 (1.35 * proximity) +
@@ -106,16 +118,26 @@ internal static class FollowHandAssistant
             _ => 1.35,
         };
 
-        // Rapid fly-through gestures are deliberately conservative. AltSnap uses the same general
-        // principle: high movement speed suppresses snapping so crossing an edge is not mistaken
-        // for an intent to stop there.
         if (gesture.EndSpeedPixelsPerSecond > 2200)
         {
             threshold += 0.55;
         }
 
-        var shouldApply = correctionDistance >= 1.5 && correctionDistance <= maxCorrection && best.Score >= threshold;
-        var confidence = Math.Clamp((best.Score - 0.7) / 2.2, 0, 1);
+        var learnedTargetSupport =
+            personalization.FollowGestureSamples >= 12 &&
+            best.PersonalBias >= 0.30 &&
+            correctionDistance <= radius &&
+            best.AttentionPenalty <= 0.20 &&
+            gesture.EndSpeedPixelsPerSecond <= 1500;
+        var scoreAccepted = best.Score >= threshold ||
+                            (learnedTargetSupport && best.Score >= threshold - 0.55);
+        var shouldApply = correctionDistance >= 1.5 &&
+                          correctionDistance <= maxCorrection &&
+                          scoreAccepted;
+        var confidence = Math.Clamp(
+            ((best.Score - 0.7) / 2.2) + (learnedTargetSupport ? 0.12 : 0),
+            0,
+            1);
         return new FollowHandDecision(
             shouldApply,
             shouldApply ? best.Target : gesture.EndRect,
@@ -632,6 +654,8 @@ internal static class FollowHandAssistant
         internal FollowHandTargetKind Kind { get; } = kind;
         internal RectI Target { get; } = target;
         internal double BaseScore { get; } = baseScore;
+        internal double PersonalBias { get; set; }
+        internal double AttentionPenalty { get; set; }
         internal double Score { get; set; }
     }
 
