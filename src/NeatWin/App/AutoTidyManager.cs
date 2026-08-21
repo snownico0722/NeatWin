@@ -430,16 +430,12 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     private static double CursorProximity(NativeMethods.Point cursor, RectI rect, RectI workArea)
     {
-        var dx = cursor.X < rect.Left ? rect.Left - cursor.X : cursor.X > rect.Right ? cursor.X - rect.Right : 0;
-        var dy = cursor.Y < rect.Top ? rect.Top - cursor.Y : cursor.Y > rect.Bottom ? cursor.Y - rect.Bottom : 0;
-        if (dx == 0 && dy == 0)
-        {
-            return 1.0;
-        }
-
-        var distance = Math.Sqrt((dx * dx) + (dy * dy));
-        var diagonal = Math.Sqrt((double)workArea.Width * workArea.Width + (double)workArea.Height * workArea.Height);
-        return Math.Exp(-distance / Math.Max(120.0, diagonal * 0.16));
+        var point = new PointI(cursor.X, cursor.Y);
+        var acquisition = HumanFactorsMetrics.PointerAcquisitionQuality(point, rect);
+        var locality = HumanFactorsMetrics.VisualLocalityQuality(point, rect, workArea);
+        // Fitts-style target acquisition is the stronger signal; visual locality is a lighter
+        // prior for wide/multi-monitor workspaces. Neither is treated as literal eye gaze.
+        return Math.Clamp((0.72 * acquisition) + (0.28 * locality), 0, 1);
     }
 
     private static ManualGestureKind ClassifyGesture(RectI start, RectI end)
