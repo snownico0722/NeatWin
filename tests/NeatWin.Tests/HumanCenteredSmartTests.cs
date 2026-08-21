@@ -43,10 +43,11 @@ public sealed class HumanCenteredSmartTests
         var leftTarget = TargetFor(result.Moves, left);
         var rightTarget = TargetFor(result.Moves, right);
 
-        Assert.Equal(WorkArea, leftTarget.Intersect(WorkArea).Intersect(leftTarget));
+        Assert.Equal(leftTarget.Area, leftTarget.Intersect(WorkArea).Area);
+        Assert.Equal(rightTarget.Area, rightTarget.Intersect(WorkArea).Area);
         Assert.True(leftTarget.Width >= 700);
         Assert.True(rightTarget.Width >= 700);
-        Assert.True(leftTarget.Intersect(rightTarget).Area == 0);
+        Assert.Equal(0, leftTarget.Intersect(rightTarget).Area);
         Assert.True(Math.Abs(leftTarget.Width - left.VisualRect.Width) < 180);
         Assert.True(Math.Abs(rightTarget.Width - right.VisualRect.Width) < 180);
     }
@@ -103,7 +104,8 @@ public sealed class HumanCenteredSmartTests
         Assert.True(decision.ShouldApply);
         Assert.Equal(FollowHandTargetKind.ScreenEdge, decision.TargetKind);
         Assert.Equal(0, decision.TargetRect.Left);
-        Assert.Equal(moved.VisualRect.Size(), decision.TargetRect.Size());
+        Assert.Equal(moved.VisualRect.Width, decision.TargetRect.Width);
+        Assert.Equal(moved.VisualRect.Height, decision.TargetRect.Height);
     }
 
     [Fact]
@@ -261,9 +263,4 @@ public sealed class HumanCenteredSmartTests
 
     private static RectI TargetFor(IReadOnlyList<TidyMove> plan, WindowSnapshot window) =>
         plan.FirstOrDefault(move => move.Window.Handle == window.Handle)?.TargetVisualRect ?? window.VisualRect;
-}
-
-internal static class RectITestExtensions
-{
-    internal static Size Size(this RectI rect) => new(rect.Width, rect.Height);
 }
