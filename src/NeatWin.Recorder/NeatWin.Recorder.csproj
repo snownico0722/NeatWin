@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../NeatWin/Core/Geometry.cs" Link="Shared/Geometry.cs" />
+    <Compile Include="../NeatWin/Core/Models.cs" Link="Shared/Models.cs" />
+    <Compile Include="../NeatWin/Core/VisibilityAnalyzer.cs" Link="Shared/VisibilityAnalyzer.cs" />
+    <Compile Include="../NeatWin/Core/IntentEvidence.cs" Link="Shared/IntentEvidence.cs" />
+    <Compile Include="../NeatWin/Reference/IntentReferenceStore.cs" Link="Shared/IntentReferenceStore.cs" />
+    <Compile Include="../NeatWin/Windows/NativeMethods.cs" Link="Shared/NativeMethods.cs" />
+    <Compile Include="../NeatWin/Windows/WindowManager.cs" Link="Shared/WindowManager.cs" />
+    <Compile Include="../NeatWin/Windows/AutomationGuard.cs" Link="Shared/AutomationGuard.cs" />
+  </ItemGroup>
+</Project>
