@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: windows-latest
@@ -37,18 +41,72 @@ jobs:
         run: dotnet restore tests/NeatWin.Tests/NeatWin.Tests.csproj
 
       - name: Test
-        run: dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj --configuration Release --no-restore
+        run: >-
+          dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj
+          --configuration Release --no-restore
+          --logger "trx;LogFileName=tests.trx"
+          --results-directory TestResults
 
-      - name: Publish x64
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-test-results
+          path: TestResults/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Build standalone recorder
+        run: dotnet build src/NeatWin.Recorder/NeatWin.Recorder.csproj --configuration Release
+
+      - name: Publish main x64
         run: >-
           dotnet publish src/NeatWin/NeatWin.csproj
-          --configuration Release
-          --runtime win-x64
-          --self-contained false
-          -p:PublishSingleFile=true
-          -p:DebugType=None
-          -p:DebugSymbols=false
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
           --output artifacts/win-x64
+
+      - name: Publish recorder x64
+        run: >-
+          dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --output artifacts/win-x64
+
+      - name: Startup smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('NeatWin.exe', 'NeatWin.Recorder.exe')) {
+            $executable = (Resolve-Path "artifacts/win-x64/$name").Path
+            $process = Start-Process -FilePath $executable -PassThru
+            try {
+              if (-not $process.WaitForInputIdle(20000)) {
+                throw "$name did not reach a GUI message loop."
+              }
+              Start-Sleep -Seconds 3
+              $process.Refresh()
+              if ($process.HasExited) { throw "$name exited during startup: $($process.ExitCode)" }
+              Write-Output "$name reached the GUI message loop and remained running."
+            } finally {
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                $process.WaitForExit()
+              }
+            }
+          }
+
+      - name: Package usage and checksums
+        shell: pwsh
+        run: |
+          Copy-Item README.md artifacts/win-x64/README.md
+          New-Item -ItemType Directory -Force artifacts/win-x64/docs | Out-Null
+          Copy-Item docs/*.md artifacts/win-x64/docs/
+          Get-ChildItem artifacts/win-x64/*.exe | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content artifacts/win-x64/SHA256SUMS.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
