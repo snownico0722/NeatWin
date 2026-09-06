@@ -1,153 +1,73 @@
 # NeatWin
 
-> V0 prototype: intelligent visible-window tidy, intentionally not a tiling window manager.
+Windows 浮动窗口整理工具。不是平铺窗口管理器，也不把你的每次摆放当成正确答案。
 
-NeatWin is a small Windows utility that **tidies the windows you are actually looking at** without replacing the normal floating-window desktop with a tiling window manager.
+## 这一版：有排布感，但不接管桌面
 
-Use the main-window button or a configurable global hotkey. NeatWin treats the current floating arrangement as user intent, infers nearby relationships, and makes the smallest useful geometric correction it can.
+基于 `agent/human-centered-smart-v1` 继续改进，区分两种操作：
 
-## Smart by default
+- **整理按钮／全局快捷键**：明确要求整理时，主动对当前可见的相邻窗口进行局部分组、对齐、收拢间距、减少重叠。保留大致左右／上下顺序和合理尺寸，不为了用满超宽屏而把窗口强制拉满。
+- **随手辅助**：拖动／缩放结束后，只对你刚调整的窗口做小范围辅助；不会每次松手都重新排整张桌面。可以单独关闭。
 
-NeatWin has two solver modes:
+温和／均衡／积极三个强度仍可选，默认均衡。新的 Smart 同时比较原状、上一版的局部纠正结果和多种局部分组方案，补上“几乎不动”与“铺满整块屏幕”之间的选择。没有把“保留当前布局”当成绝对目标；安全约束、窗口可用性和清晰的空间关系优先。
 
-- **Smart · intelligent tidy** — the default. It infers a sparse graph of likely relationships between currently visible windows and solves those relationships together instead of applying one `if` rule after another.
-- **Classic · threshold rules** — the original deterministic fallback. It is retained for users who explicitly want direct pixel/percentage thresholds.
+**撤销上次整理**位于主窗口和托盘菜单。只恢复仍处于本次整理结果中的窗口；你后来手动改过、关闭了、换了屏幕或工作区的窗口会跳过。原有 Classic、可逆纵向填充、视频比例选项继续保留。
 
-Smart models each window edge as a geometric variable. Internally it builds weighted constraints for staying close to the original arrangement, resisting unnecessary resize, closing likely gaps/overlaps, aligning rows/columns and using nearby monitor boundaries. The active foreground window is preserved more strongly than a partly occluded visible window.
+## 独立的习惯记录器
 
-Constraint confidence decays smoothly with geometric distance rather than switching abruptly at a single threshold. The solver performs damped weighted relaxation and projects every iteration back into hard usability limits such as resize budgets, minimum dimensions and monitor work areas.
-
-The approach is conceptually related to constraint-based graph-layout adjustment and overlap-removal work such as Dwyer, Marriott and Stuckey's separation-constraint methods: preserve the original layout as much as possible while satisfying a small, high-confidence set of spatial relationships. NeatWin adds window-specific concerns such as visible-Z-order filtering, focus importance, resizability and monitor work areas.
-
-### Simple Smart controls
-
-Smart deliberately does **not** expose raw solver weights, inference radii, iteration counts or pixel budgets in the GUI. Users express intent with a small set of human-readable choices:
-
-- **Tidy strength: Gentle / Balanced / Assertive** — how much the solver is willing to change the current arrangement overall.
-- **Hit tendency: Cautious / Balanced / Sensitive** — how readily nearby windows are interpreted as belonging to the same alignment/adjacency structure.
-- **Size tendency: Preserve size / Balanced / Expand usage** — whether Smart should prefer moving whole windows or allow more resizing to use nearby free screen space.
-- **Overlap avoidance: Gentle / Balanced / Strong** — how deep an overlap must be before Smart actively separates the windows. Separation uses the lower-cost axis and moves the active/important window less.
-- **Prefer reversible vertical fill** — when a window is already a strong candidate to use the full work-area height, Smart prefers an exact top-to-bottom fill. NeatWin remembers the pre-tidy rectangle so a later title-bar drag can restore the previous size under the pointer.
-
-The default is Balanced for the three main tendencies and overlap avoidance, with reversible vertical fill enabled. Smart ignores legacy/raw Classic tuning values even if they remain in an older settings file.
-
-When **Classic** is selected, the GUI switches to explicit threshold controls such as neighbor distance, edge-alignment distance, screen-edge distance, movement limit, resize percentage and rule passes.
-
-Off-screen rescue remains a separate behavior switch in both modes. Settings are persisted in `%LOCALAPPDATA%\NeatWin\settings.json` and apply immediately.
-
-### About reversible vertical fill
-
-Windows treats a truly snapped window as a special arranged state with a separate restore rectangle. The public API that can directly apply an arranged state to a window is restricted and cannot be used by NeatWin to arrange arbitrary windows owned by other applications.
-
-NeatWin therefore implements **Windows-like reversible fill**, not native Windows Arranged/Snap state: it uses exact work-area geometry, records the pre-tidy rectangle, listens for the system move/size-start event, and restores the previous size only when the user starts dragging from the title-bar region. Border resizing does not trigger the restore path.
-
-## Visible working set
-
-NeatWin deliberately does **not** manage every `WS_VISIBLE` window.
-
-- Top-level windows are captured in Z-order.
-- Each candidate is clipped to its monitor work area.
-- Rectangles from windows in front are subtracted from windows behind them.
-- Fully covered background windows are excluded.
-- Windows with only a tiny exposed fragment are ignored.
-- The active foreground window is kept whenever it has any visible area.
-- Fully off-screen windows are not surfaced unexpectedly.
-- A **partly off-screen window that is actually visible** can be rescued into the usable work area.
-
-The default visibility gate uses a 12% exposed-area threshold plus a minimum 40,000 px² largest visible fragment.
-
-## Safety and behavior constraints
-
-- Maximized windows, owned dialogs, tool windows and no-activate utility surfaces are not rearranged.
-- Windows are never moved across monitors.
-- Focus and Z-order are preserved when the tidy plan is applied.
-- Distant windows are left alone instead of being forced into a template.
-- Ordinary Smart/Classic changes are bounded by internal/profile or explicit Classic movement and resize budgets.
-- **Off-screen rescue is a correctness constraint:** when enabled, it may exceed the ordinary movement budget so a visible window cannot remain stranded outside the work area.
-- Oversized resizable windows can be reduced just enough to fit the usable work area; fixed-size windows retain their dimensions and are moved as far into the work area as Windows allows.
-
-## GUI and hotkey
-
-NeatWin opens a small WinForms control window on startup so its running state is obvious.
-
-- **Tidy visible windows** is always available as a mouse button.
-- The global shortcut is optional and configurable with Ctrl / Alt / Shift / Win plus A-Z, 0-9 or F1-F12.
-- If a shortcut is already owned by another program, NeatWin keeps running and the mouse button still works.
-- A failed shortcut change rolls back to the previous working binding.
-- Closing the main window hides it to the system tray; double-click the tray icon to reopen it.
-
-## Architecture
+发布包内有两个可独立运行的 Windows x64 程序，均包含 .NET 运行时：
 
 ```text
-GUI / hotkey / tray
-        |
-        v
-Window capture (Win32 + DWM)
-        |
-        v
-Z-order visibility analysis
-(rectangle clipping + subtraction)
-        |
-        v
-Visible working set
-        |
-        +---------------------------+
-        |                           |
-        v                           v
-Smart topology inference       Classic rules
-        |
-        v
-Weighted constraint system
-        |
-        v
-Damped relaxation + projection
-        |
-        v
-Smart behavior projection
-(vertical fill + overlap separation)
-        |
-        +-------------+-------------+
-                      |
-                      v
-              Rect[] tidy plan
-                      |
-                      v
-             DeferWindowPos batch
-             (NOACTIVATE + NOZORDER)
+NeatWin.exe             窗口整理与随手辅助
+NeatWin.Recorder.exe    只观察，不移动窗口；无需启动 NeatWin
 ```
 
-The geometry/visibility/solver layers are separated from Win32 application plumbing so core behavior can be unit-tested without touching real desktop windows.
+解压后保留两个程序在同一目录，主程序中的“习惯记录器”按钮可直接启动它。也可以只运行 `NeatWin.Recorder.exe`。
 
-### Reference projects
+记录器启动后开始记录，关闭面板后留在托盘。支持暂停／继续、打开数据目录、导出 ZIP、清空记录，以及**默认关闭、由你主动勾选**的登录启动。托盘“退出记录器”才会完全退出。重复运行不会开启第二份记录进程。
 
-The Windows integration strategy is informed by mature window-management code in **Microsoft PowerToys / FancyZones**, especially its handling of DWM frame bounds, resizable-window checks, monitor work areas and DPI-sensitive placement. The separation between window plumbing and a pure layout engine is also inspired by **Whim**.
+### 记录什么
 
-NeatWin does not copy their layout behavior: its goal is to preserve an existing floating arrangement and apply the smallest useful correction rather than retile the workspace.
+记录真实窗口移动／缩放事件前后的矩形、显示器工作区、DPI、操作时长和少量邻近窗口的几何。每次运行使用临时会话编号和窗口编号，**不保存窗口标题、应用名、进程号、原始窗口句柄、键盘内容、截图或鼠标轨迹**。记录器没有联网和自动上传功能。
 
-## Build
+原始几何也可能反映工作时间与使用习惯。导出的 ZIP 应视为个人数据，不要直接提交到公开仓库。
 
-Requirements:
+数据目录：
 
-- Windows 10 2004 or later / Windows 11
-- .NET 8 SDK
+```text
+%LOCALAPPDATA%\NeatWin\Recorder
+```
+
+`adjustments-*.jsonl` 是可审阅的原始记录，`intent-reference.json` 是弱参考摘要。日志滚动保留，最多 16 个文件、32 MB、30 天；运行期间定期清理，关闭期间不运行清理。导出 ZIP 包含这些原始记录和参考摘要，**不会自动发往任何地方**。清空仅删除记录器数据，不删除主程序设置。
+
+### 观察不是模仿学习
+
+原始落点不是“正确布局”标签。拖动结束后先保留观察；连续修正、跨屏、后续状态变化或 NeatWin 介入会标记出来，不能直接作为偏好证据。两秒内没变也只表示本次观察暂时稳定，**不表示满意**。
+
+当前仅提取少量“完成邻接关系”的线索：间距与横向／纵向关系。至少 6 个样本、分散在至少 3 个五分钟时间段，并经过去重、时效衰减和一致性检查后，才产生有限影响。参考最多占间距融合的 25%，实际基准间距限制在 6–14 DIP；方向只做很小的评分微调。不会训练“不要移动”“不要缩放”或整套布局模板。
+
+旧版整理后立刻修改布局就训练整个偏好的在线路径已经停用。旧设置保留在磁盘上，但旧学习权重不再参与产品排布。主程序只读新参考，不写训练数据；记录器是唯一写入者。托盘菜单可关闭“使用记录器的弱参考”，不影响记录，也不必删除数据。不运行记录器时，主程序仍能正常整理。
+
+## 构建与验证
+
+需要 Windows 10 2004 或更新版本／Windows 11，以及 .NET 8 SDK。
 
 ```powershell
-dotnet build src/NeatWin/NeatWin.csproj -c Release
 dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj -c Release
+dotnet build src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release
+
+dotnet publish src/NeatWin/NeatWin.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64
+dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64
 ```
 
-GitHub Actions builds and tests the project on `windows-latest` and publishes a framework-dependent x64 single-file artifact.
+GitHub Actions 运行旧回归测试和新增的局部排布／弱参考／存储测试，构建并发布两个程序。CI 测试日志与源码快照也作为构建产物保留。
 
-The Smart V0 regression suite covers visibility filtering, off-screen recovery, exact local gap/overlap convergence, screen-edge anchors, Smart profile behavior, overlap separation profiles, reversible vertical-fill geometry, isolation from Classic raw thresholds, a three-window topology case, and Classic fallback.
+## 边界
 
-## Current limitations
+只整理当前真正露出的可管理窗口，不主动唤出被完全遮挡的窗口，不跨显示器，不改变焦点和 Z 顺序。最大化窗口、工具窗口、拥有者对话框等仍排除。可见但部分出屏的窗口保留救回行为。
 
-V0 still has deliberate boundaries:
+不能保证所有窗口都排成零重叠：窗口太多、屏幕太小或应用尺寸约束使方案不可行时，保留安全的原状／局部结果。Windows 应用可能拒绝或限制尺寸调整。快速重复操作、混合 DPI、浏览器自绘标题栏和其他窗口管理工具仍需要真实桌面回归。
 
-- Occlusion is rectangle-based; irregular transparency and shaped windows are not pixel-accurate.
-- There is no movement animation yet; correctness and predictable geometry come first.
-- Smart inference is geometric rather than semantic: it does not know that one window is a browser and another is a chat client.
-- The first Smart solver uses a sparse weighted constraint graph and iterative relaxation rather than a full general-purpose QP package.
-- Reversible vertical-fill restoration uses a conservative title-bar hit heuristic because applications can implement custom non-client areas.
-- Native window minimum-track sizes are not queried yet; Windows may clamp a requested resize for apps with stricter limits.
-- Real multi-monitor, mixed-DPI and unusual application-window behavior still need broader desktop testing.
+记录器监听 Windows move/size 生命周期，不宣称覆盖所有 Win+方向键、第三方程序调整或应用自定义的移动方式。NeatWin 调整通过共享短期标记排除；未知第三方自动化无法被完美归因。几何观察不是眼动或语义理解，也不等同于“学会了完整习惯”。
+
+具体设计、数据字段和手动验收见 [设计说明](docs/INTENT_LAYOUT_AND_RECORDER.md)。旧求解器研究说明保留在 [SMART_SOLVER.md](docs/SMART_SOLVER.md)，其中 V0 的产品路径不再代表当前主程序。

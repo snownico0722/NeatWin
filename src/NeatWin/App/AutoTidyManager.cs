@@ -251,6 +251,8 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
             return;
         }
 
+        _debounceTimer.Stop();
+        _pendingGesture = null;
         var now = Environment.TickCount64;
         _ = NativeMethods.GetCursorPos(out var cursor);
         var samples = new List<PointerMotionSample>(MaximumPointerSamples)
@@ -305,7 +307,8 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
     private void OnDebounceTick(object? sender, EventArgs eventArgs)
     {
         _debounceTimer.Stop();
-        if (_disposed || !_enabled || IsSuppressed || _pendingGesture is not ManualWindowGesture gesture)
+        if (_disposed || !_enabled || IsSuppressed || _activeGesture is not null ||
+            _pendingGesture is not ManualWindowGesture gesture)
         {
             return;
         }
