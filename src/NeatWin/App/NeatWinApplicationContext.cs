@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using NeatWin.Reference;
 using System.Runtime.InteropServices;
 using NeatWin.Core;
 using NeatWin.Windows;
@@ -19,8 +21,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly AutoTidyManager _autoTidyManager;
     private TidyOptions _tidyOptions;
     private SmartBehaviorOptions _smartBehaviorOptions;
-    private SmartPersonalizationState _smartPersonalization;
-    private PendingAutoLearning? _pendingAutoLearning;
+    private readonly IntentReferenceStore _referenceStore = new();
+    private IReadOnlyList<TidyMove> _undoPlan = [];
     private bool _autoTidyEnabled;
     private bool _tidyRunning;
 
@@ -29,12 +31,10 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         var requestedHotkey = _settingsStore.LoadHotkey();
         _tidyOptions = _settingsStore.LoadTidyOptions();
         _smartBehaviorOptions = _settingsStore.LoadSmartBehaviorOptions();
-        _smartPersonalization = _settingsStore.LoadSmartPersonalization();
         _verticalFillManager = new ReversibleVerticalFillManager();
         _autoTidyManager = new AutoTidyManager();
         _autoTidyEnabled = _settingsStore.LoadAutoTidyEnabled() && _autoTidyManager.IsAvailable;
         _autoTidyManager.Enabled = _autoTidyEnabled;
-        _autoTidyManager.GestureObserved += OnGestureObserved;
         _autoTidyManager.TidyRequested += OnFollowHandRequested;
 
         _hotkeyWindow = new HotkeyWindow();
@@ -46,6 +46,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             _smartBehaviorOptions,
             _autoTidyEnabled);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
+        _mainWindow.UndoRequested += (_, _) => UndoTidy();
+        _mainWindow.RecorderRequested += (_, _) => OpenRecorder();
         _mainWindow.HotkeyChangeRequested += OnHotkeyChangeRequested;
         _mainWindow.TidyOptionsChangeRequested += OnTidyOptionsChangeRequested;
         _mainWindow.AutoTidyChangeRequested += OnAutoTidyChangeRequested;
@@ -54,6 +56,15 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open NeatWin", null, (_, _) => _mainWindow.BringToFrontFromTray());
         menu.Items.Add("Tidy visible windows", null, (_, _) => RunTidy());
+        menu.Items.Add("撤销上次整理", null, (_, _) => UndoTidy());
+        menu.Items.Add("打开习惯记录器", null, (_, _) => OpenRecorder());
+        var useReference = new ToolStripMenuItem("使用记录器的弱参考") { Checked = _referenceStore.Enabled, CheckOnClick = true };
+        useReference.CheckedChanged += (_, _) =>
+        {
+            try { _referenceStore.SetEnabled(useReference.Checked); }
+            catch (Exception ex) { _mainWindow.SetActivity($"参考开关保存失败：{ex.Message}", error: true); }
+        };
+        menu.Items.Add(useReference);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
@@ -84,7 +95,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         if (disposing)
         {
             _hotkeyWindow.HotkeyPressed -= RunTidy;
-            _autoTidyManager.GestureObserved -= OnGestureObserved;
             _autoTidyManager.TidyRequested -= OnFollowHandRequested;
             _hotkeyWindow.Dispose();
             _autoTidyManager.Dispose();
@@ -178,86 +188,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         }
     }
 
-    private void OnGestureObserved(ManualWindowGesture gesture)
-    {
-        if (_tidyRunning)
-        {
-            return;
-        }
-
-        try
-        {
-            var snapshot = _windowManager.Capture();
-            var visible = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
-
-            // Behavior B learns from the raw mouse-up rectangle before NeatWin assists it. This is
-            // important: learning from our own snapped result would create a self-reinforcing loop.
-            _smartPersonalization = FollowHandAssistant.LearnFromRawGesture(
-                _smartPersonalization,
-                gesture,
-                visible);
-
-            TryLearnAutoCorrection(gesture, visible);
-            SavePersonalizationQuietly();
-        }
-        catch
-        {
-            // Personalization is opportunistic. Never let telemetry/model persistence interfere
-            // with the user's actual window manipulation.
-        }
-    }
-
-    private void TryLearnAutoCorrection(
-        ManualWindowGesture gesture,
-        IReadOnlyList<VisibleWindow> visibleWindows)
-    {
-        var pending = _pendingAutoLearning;
-        if (pending is null)
-        {
-            return;
-        }
-
-        var age = Environment.TickCount64 - pending.LastUpdateTick;
-        if (age < 0 || age > 14000 || pending.Corrections >= 3)
-        {
-            _pendingAutoLearning = null;
-            return;
-        }
-
-        if (!pending.AffectedHandles.Contains(gesture.WindowHandle))
-        {
-            return;
-        }
-
-        var magnitude = RectChangeMagnitude(gesture.StartRect, gesture.EndRect, gesture.WorkArea);
-        if (magnitude < 0.015)
-        {
-            return;
-        }
-
-        var interaction = _autoTidyManager.CaptureInteractionContext(visibleWindows);
-        var corrected = HumanCenteredSmartPlanner.DescribeCurrentLayout(
-            visibleWindows,
-            interaction,
-            _smartPersonalization);
-        var timeConfidence = Math.Clamp(1.0 - (age / 14000.0), 0.25, 1.0);
-        var magnitudeConfidence = Math.Clamp(magnitude / 0.10, 0.25, 1.0);
-        var confidence = timeConfidence * magnitudeConfidence;
-
-        _smartPersonalization = SmartPersonalizationLearner.LearnAutoCorrection(
-            _smartPersonalization,
-            pending.Learning,
-            corrected.Archetype,
-            corrected.Features,
-            confidence);
-        _pendingAutoLearning = pending with
-        {
-            Learning = corrected,
-            LastUpdateTick = Environment.TickCount64,
-            Corrections = pending.Corrections + 1,
-        };
-    }
-
     private void OnFollowHandRequested(ManualWindowGesture gesture)
     {
         if (!_autoTidyEnabled || _tidyRunning)
@@ -277,19 +207,26 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             var snapshot = _windowManager.Capture();
             var visible = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
             var moved = visible.FirstOrDefault(item => item.Window.Handle == gesture.WindowHandle);
-            if (moved is null)
+            if (moved is null || moved.Window.WorkArea != gesture.WorkArea ||
+                !SameRect(moved.Window.VisualRect, gesture.EndRect))
             {
                 return;
             }
 
             var interaction = _autoTidyManager.CaptureInteractionContext(visible);
+            var hint = IntentEvidence.Resolve(_referenceStore.Read(), moved.Window.WorkArea,
+                moved.Window.Dpi, DateTimeOffset.UtcNow);
+            // Legacy learned weights stay on disk for compatibility but no longer steer the product.
+            var personal = SmartPersonalizationState.Default with { PreferredGapPixels = hint.GapPixels };
             var decision = FollowHandAssistant.Decide(
                 gesture,
-                visible,
+                visible.Where(v => v.Window.MonitorHandle == moved.Window.MonitorHandle).ToArray(),
                 _tidyOptions,
                 interaction,
-                _smartPersonalization);
-            if (!decision.ShouldApply || decision.TargetRect == moved.Window.VisualRect)
+                personal);
+            if (!decision.ShouldApply || decision.TargetRect == moved.Window.VisualRect ||
+                (!moved.Window.IsResizable && (decision.TargetRect.Width != moved.Window.VisualRect.Width ||
+                    decision.TargetRect.Height != moved.Window.VisualRect.Height)))
             {
                 return;
             }
@@ -322,26 +259,18 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         {
             var snapshot = _windowManager.Capture();
             var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
-            var interaction = _autoTidyManager.CaptureInteractionContext(visibleWorkingSet);
 
             VideoBlackBarHint? videoHint = null;
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
-                _smartBehaviorOptions.RemoveVideoBlackBars)
+                _smartBehaviorOptions.RemoveVideoBars)
             {
                 videoHint = _videoBlackBarDetector.TryDetect(visibleWorkingSet);
             }
 
-            SmartLearningSnapshot? autoLearning = null;
             IReadOnlyList<TidyMove> plan;
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
             {
-                var smartResult = HumanCenteredSmartPlanner.CreatePlan(
-                    visibleWorkingSet,
-                    _tidyOptions,
-                    interaction,
-                    _smartPersonalization);
-                plan = smartResult.Moves;
-                autoLearning = smartResult.Learning;
+                plan = IntentLayoutPlanner.CreatePlan(visibleWorkingSet, _tidyOptions, _referenceStore.Read());
 
                 plan = HumanCenteredExplicitBehaviors.Refine(
                     visibleWorkingSet,
@@ -390,18 +319,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 _autoTidyManager.SuppressFor(650);
                 _windowManager.Apply(plan);
 
-                if (autoLearning is not null)
-                {
-                    _pendingAutoLearning = new PendingAutoLearning(
-                        autoLearning,
-                        Environment.TickCount64,
-                        plan.Select(static move => move.Window.Handle).ToHashSet(),
-                        Corrections: 0);
-                }
-            }
-            else if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
-            {
-                _pendingAutoLearning = null;
+                _undoPlan = plan;
             }
 
             if (showActivity)
@@ -427,29 +345,45 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         }
     }
 
-    private void SavePersonalizationQuietly()
+    private static bool SameRect(RectI a, RectI b) =>
+        Math.Abs(a.X - b.X) <= 3 && Math.Abs(a.Y - b.Y) <= 3 &&
+        Math.Abs(a.Width - b.Width) <= 3 && Math.Abs(a.Height - b.Height) <= 3;
+
+    private void UndoTidy()
     {
+        if (_tidyRunning || _undoPlan.Count == 0)
+        {
+            _mainWindow.SetActivity("没有可撤销的整理。");
+            return;
+        }
         try
         {
-            _settingsStore.SaveSmartPersonalization(_smartPersonalization);
+            var current = _windowManager.Capture().ToDictionary(w => w.Handle);
+            var reverse = new List<TidyMove>();
+            foreach (var move in _undoPlan)
+                if (current.TryGetValue(move.Window.Handle, out var window) && window.IsManageable &&
+                    window.ProcessId == move.Window.ProcessId &&
+                    window.MonitorHandle == move.Window.MonitorHandle && window.WorkArea == move.Window.WorkArea &&
+                    SameRect(window.VisualRect, move.TargetVisualRect))
+                    reverse.Add(new TidyMove(window, move.Window.VisualRect));
+            _autoTidyManager.SuppressFor(650);
+            _windowManager.Apply(reverse);
+            var skipped = _undoPlan.Count - reverse.Count;
+            _undoPlan = [];
+            _mainWindow.SetActivity($"已还原 {reverse.Count} 个窗口；跳过 {skipped} 个已再次调整、关闭或状态改变的窗口。");
         }
-        catch
-        {
-            // Preferences still remain active for this process. Avoid noisy status messages for
-            // opportunistic learning; normal settings save errors remain visible elsewhere.
-        }
+        catch (Exception ex) { _mainWindow.SetActivity($"撤销失败：{ex.Message}", error: true); }
     }
 
-    private static double RectChangeMagnitude(RectI start, RectI end, RectI workArea)
+    private void OpenRecorder()
     {
-        var diagonal = Math.Sqrt((double)workArea.Width * workArea.Width + (double)workArea.Height * workArea.Height);
-        diagonal = Math.Max(1, diagonal);
-        var centerDx = ((end.Left + end.Right) - (start.Left + start.Right)) / 2.0;
-        var centerDy = ((end.Top + end.Bottom) - (start.Top + start.Bottom)) / 2.0;
-        var center = Math.Sqrt((centerDx * centerDx) + (centerDy * centerDy)) / diagonal;
-        var resize = (Math.Abs(end.Width - start.Width) + Math.Abs(end.Height - start.Height)) /
-                     (double)Math.Max(1, workArea.Width + workArea.Height);
-        return center + resize;
+        var path = Path.Combine(AppContext.BaseDirectory, "NeatWin.Recorder.exe");
+        try
+        {
+            if (!File.Exists(path)) throw new FileNotFoundException("请将 NeatWin.Recorder.exe 放在 NeatWin.exe 同一目录。", path);
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex) { _mainWindow.SetActivity($"无法打开记录器：{ex.Message}", error: true); }
     }
 
     private void UpdateTrayText(HotkeyBinding binding)
@@ -458,11 +392,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _trayIcon.Text = text.Length <= 63 ? text : "NeatWin";
     }
 
-    private sealed record PendingAutoLearning(
-        SmartLearningSnapshot Learning,
-        long LastUpdateTick,
-        HashSet<nint> AffectedHandles,
-        int Corrections);
+
 }
 
 internal sealed class HotkeyWindow : NativeWindow, IDisposable
@@ -508,7 +438,7 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
         {
             ActiveBinding = binding;
             _registered = true;
-            message = $"快捷键已启用：{binding}";
+            message = "快捷键已启用：{binding}";
             return true;
         }
 
