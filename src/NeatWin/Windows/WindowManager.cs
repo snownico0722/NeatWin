@@ -103,7 +103,9 @@ public sealed class WindowManager
                 isResizable,
                 hwnd == foreground,
                 isManageable,
-                zOrder++));
+                zOrder++,
+                Math.Max(96u, NativeMethods.GetDpiForWindow(hwnd)),
+                processId));
 
             return true;
         }, nint.Zero);
@@ -122,6 +124,8 @@ public sealed class WindowManager
         {
             return;
         }
+
+        foreach (var move in plan) AutomationGuard.Mark(move.Window.Handle);
 
         var flags =
             NativeMethods.SwpNoZOrder |
