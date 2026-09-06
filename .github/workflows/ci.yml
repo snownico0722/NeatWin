@@ -6,6 +6,9 @@ on:
       - agent/**
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: windows-latest
@@ -13,6 +16,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Archive source snapshot
+        shell: pwsh
+        run: git archive --format=zip --output=NeatWin-source.zip HEAD
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-source
+          path: NeatWin-source.zip
+          retention-days: 14
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -41,3 +55,4 @@ jobs:
         with:
           name: NeatWin-win-x64
           path: artifacts/win-x64/
+          retention-days: 14
