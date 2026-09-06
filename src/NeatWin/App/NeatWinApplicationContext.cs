@@ -262,7 +262,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
             VideoBlackBarHint? videoHint = null;
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
-                _smartBehaviorOptions.RemoveVideoBars)
+                _smartBehaviorOptions.RemoveVideoBlackBars)
             {
                 videoHint = _videoBlackBarDetector.TryDetect(visibleWorkingSet);
             }
@@ -438,7 +438,7 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
         {
             ActiveBinding = binding;
             _registered = true;
-            message = "快捷键已启用：{binding}";
+            message = $"快捷键已启用：{binding}";
             return true;
         }
 
