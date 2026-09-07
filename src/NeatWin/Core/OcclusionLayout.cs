@@ -78,7 +78,7 @@ internal static partial class IntentLayoutPlanner
         candidates.Add(new(kind, rects, natural));
         if (windows.Any(w => w.Window.IsTopmost) || windows.Length > 6) return;
         // A finite set of relative-order alternatives. No always-on-top bit is changed.
-        var orders = new List<int[]> { natural.Reverse().ToArray(),
+        var orders = new List<int[]> { Enumerable.Reverse(natural).ToArray(),
             natural.OrderBy(i => rects[i].X).ToArray(), natural.OrderByDescending(i => rects[i].X).ToArray() };
         for (var i = 1; i < windows.Length; i++)
             orders.Add(new[] { i }.Concat(natural.Where(j => j != i)).ToArray());
