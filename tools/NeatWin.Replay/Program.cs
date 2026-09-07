@@ -23,11 +23,20 @@ try
             var plan = IntentLayoutPlanner.CreateDetailedPlan(visible, new TidyOptions(), desktop: windows);
             var target = windows.Select(w => plan.Moves.FirstOrDefault(m => m.Window.Handle == w.Handle)?.TargetVisualRect ?? w.VisualRect).ToArray();
             var moved = windows.Select((w, i) => Math.Sqrt(Math.Pow(w.VisualRect.X - target[i].X, 2) + Math.Pow(w.VisualRect.Y - target[i].Y, 2))).ToArray();
+            var layerOrder = windows.ToDictionary(w => w.Handle, w => w.ZOrder);
+            foreach (var layer in plan.Layers)
+            {
+                var ranks = layer.FrontToBack.Select(w => layerOrder[w.Handle]).Order().ToArray();
+                for (var i = 0; i < ranks.Length; i++) layerOrder[layer.FrontToBack[i].Handle] = ranks[i];
+            }
+            var placed = windows.Select((w, i) => w with { VisualRect = target[i], OuterRect = target[i], ZOrder = layerOrder.GetValueOrDefault(w.Handle, w.ZOrder) }).OrderBy(w => w.ZOrder).ToArray();
+            var second = IntentLayoutPlanner.CreateDetailedPlan(placed.Select(w => new VisibleWindow(w, w.VisualRect.Area, w.VisualRect.Area, 1)).ToArray(), new TidyOptions(), desktop: placed);
             output.WriteLine(JsonSerializer.Serialize(new
             {
                 Line = lineNumber, Reversed = reversed, Assumptions = "unknown-order-and-resizability; all-neighbors-included",
                 Families = plan.Groups.Select(g => g.Selected), Moved = plan.Moves.Count, Layers = plan.Layers.Count,
                 MaxTranslation = moved.Max(), SizesPreserved = windows.Select((w, i) => w.VisualRect.Width == target[i].Width && w.VisualRect.Height == target[i].Height).All(x => x),
+                SecondPassMoves = second.Moves.Count, SecondPassLayers = second.Layers.Count,
                 Targets = target, Candidates = plan.Groups.SelectMany(g => g.Candidates),
             }));
         }
