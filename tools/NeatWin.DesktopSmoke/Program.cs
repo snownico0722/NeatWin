@@ -14,7 +14,7 @@ internal static class Program
         Application.EnableVisualStyles();
         if (args.Length > 0 && args[0] == "--child")
         {
-            using var form = new Form { Text = "NeatWin synthetic smoke window", Size = new Size(500, 400),
+            using var form = new SyntheticWindow { Text = "NeatWin synthetic smoke window", Size = new Size(500, 400),
                 StartPosition = FormStartPosition.Manual, Location = new Point(80 + int.Parse(args[1]) * 90, 80) };
             Application.Run(form);
             return 0;
@@ -95,12 +95,9 @@ internal static class Program
         children.Add(recorder);
         Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
         Thread.Sleep(600);
-        NotifyWinEvent(0x000A, window.Handle, 0, 0);
-        Thread.Sleep(250);
-        var r = window.OuterRect;
-        Require(SetWindowPos(window.Handle, nint.Zero, r.X + 30, r.Y, r.Width, r.Height, 0x215), "Synthetic move failed.");
-        Thread.Sleep(250);
-        NotifyWinEvent(0x000B, window.Handle, 0, 0);
+        Require(window.IsManageable, "Synthetic window is not manageable.");
+        // The event must originate on the window's own server thread, as in an actual move loop.
+        Require(PostMessage(window.Handle, 0x8005, nint.Zero, nint.Zero), "Synthetic lifecycle request failed.");
         var watch = Stopwatch.StartNew();
         while (watch.ElapsedMilliseconds < 8000)
         {
@@ -128,6 +125,37 @@ internal static class Program
         throw new InvalidOperationException("Recorder did not persist the synthetic gesture.");
     }
 
+    private sealed class SyntheticWindow : Form
+    {
+        private System.Windows.Forms.Timer? _gesture;
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == 0x8005 && _gesture is null)
+            {
+                var stage = 0;
+                NotifyWinEvent(0x000A, Handle, 0, 0);
+                _gesture = new System.Windows.Forms.Timer { Interval = 250 };
+                _gesture.Tick += (_, _) =>
+                {
+                    if (stage++ == 0) { Left += 30; return; }
+                    _gesture!.Stop(); _gesture.Dispose(); _gesture = null;
+                    NotifyWinEvent(0x000B, Handle, 0, 0);
+                };
+                _gesture.Start();
+                return;
+            }
+            base.WndProc(ref message);
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _gesture?.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint type, nint hwnd, int objectId, int childId);
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
