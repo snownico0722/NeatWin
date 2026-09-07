@@ -88,9 +88,13 @@ internal static class Program
     private static void VerifyRecorder(string recorderPath, WindowSnapshot window, List<Process> children)
     {
         var started = DateTimeOffset.UtcNow;
-        var recorder = Process.Start(new ProcessStartInfo(Path.GetFullPath(recorderPath)) { UseShellExecute = false })
+        var startInfo = new ProcessStartInfo(Path.GetFullPath(recorderPath)) { UseShellExecute = false, RedirectStandardError = true };
+        startInfo.Environment["NEATWIN_EVENT_DIAGNOSTICS"] = "1";
+        var recorder = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Recorder did not start.");
         children.Add(recorder);
+        recorder.ErrorDataReceived += (_, e) => { if (e.Data is not null) Console.WriteLine("Recorder event: " + e.Data); };
+        recorder.BeginErrorReadLine();
         Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
         Thread.Sleep(600);
         Require(window.IsManageable, "Synthetic window is not manageable.");
