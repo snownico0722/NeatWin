@@ -348,7 +348,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             {
                 var kinds = string.Join("、", detailed.Groups.Select(g => KindName(g.Selected)).Distinct());
                 var message = plan.Count == 0 && layerOrders.Count == 0
-                    ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，没有需要调整的地方。"
+                    ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，本次保留原状，未找到更合适的可执行方案。"
                     : $"{kinds}：已请求调整 {plan.Count} 个窗口、{layerOrders.Count} 组层级。";
                 _mainWindow.SetActivity(application.Notes.Any(n => n.Contains("未")) ? message + " " + string.Join(" ", application.Notes) : message);
             }
@@ -393,6 +393,11 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 l.FrontToBack.All(w => current.TryGetValue(w.Handle, out var now) && now.ProcessId == w.ProcessId &&
                     SameRect(now.VisualRect, _undoPlan.FirstOrDefault(m => m.Window.Handle == w.Handle)?.TargetVisualRect ?? w.VisualRect)))
                 .Select(l => new WindowLayerOrder(l.FrontToBack.OrderBy(w => w.ZOrder).ToArray())).ToArray();
+            var restorable = reverseLayers.SelectMany(l => l.FrontToBack.Select(w => w.Handle)).ToHashSet();
+            var blocked = _undoLayers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))
+                .Where(h => !restorable.Contains(h)).ToHashSet();
+            // Do not restore the geometry of a group whose required relative order was changed.
+            reverse.RemoveAll(m => blocked.Contains(m.Window.Handle));
             _autoTidyManager.SuppressFor(650);
             var application = _windowManager.ApplyLayout(new(reverse, reverseLayers, []));
             _journal.Record(current.Values.ToArray(), application.Plan, "undo", application.Notes);
