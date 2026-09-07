@@ -42,11 +42,6 @@ internal static class Program
                 windows = manager.Capture().Where(w => ids.Contains(w.ProcessId)).ToArray();
             } while (windows.Length != 3 && watch.ElapsedMilliseconds < 5000);
             Require(windows.Length == 3, "Could not capture all three synthetic windows.");
-            if (args.Length == 1)
-            {
-                VerifyRecorder(args[0], windows[0], children);
-                windows = manager.Capture().Where(w => ids.Contains(w.ProcessId)).ToArray();
-            }
             // Only rearrange children created by this test; unrelated desktop windows are untouched.
             for (var i = 1; i < windows.Length; i++)
                 Require(SetWindowPos(windows[i].Handle, windows[i - 1].Handle, 0, 0, 0, 0, 0x213), "Initial order setup failed.");
@@ -75,6 +70,9 @@ internal static class Program
             var staleResult = manager.ApplyLayout(new([new(stale, now.VisualRect with { X = now.VisualRect.X + 80 })], [], []));
             Require(staleResult.Plan.Moves.Count == 0, "Stale geometry was applied.");
             Console.WriteLine("PASS: stale desktop geometry rejected.");
+            Require(SetWindowPos(first.Handle, (nint)(-2), 0, 0, 0, 0, 0x213), "Synthetic topmost cleanup failed.");
+            if (args.Length == 1)
+                VerifyRecorder(args[0], manager.Capture().First(w => w.Handle == windows[0].Handle), children);
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -98,17 +96,17 @@ internal static class Program
         Require(window.IsManageable, "Synthetic window is not manageable.");
         // Ask the synthetic child to enter the system move loop; system-only events are not forged.
         Require(PostMessage(window.Handle, 0x8005, nint.Zero, nint.Zero), "Synthetic lifecycle request failed.");
-        // A modal system move loop need not dispatch WinForms timers. Drive its window-targeted
-        // keyboard messages from the parent process rather than relying on a child timer.
-        Thread.Sleep(300);
+        // Posted WM_KEYDOWN messages are not equivalent to the real keyboard input stream.
+        // This test injects only into its own foreground child on the isolated x64 CI desktop.
+        Require(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" && IntPtr.Size == 8,
+            "Input smoke test is restricted to the isolated x64 Actions desktop.");
+        Thread.Sleep(350);
         for (var step = 0; step < 4; step++)
         {
-            PostMessage(window.Handle, 0x0100, (nint)0x27, (nint)1);
-            PostMessage(window.Handle, 0x0101, (nint)0x27, (nint)1);
-            Thread.Sleep(150);
+            PressKey(window.Handle, 0x27);
+            Thread.Sleep(180);
         }
-        PostMessage(window.Handle, 0x0100, (nint)0x0D, (nint)1);
-        PostMessage(window.Handle, 0x0101, (nint)0x0D, (nint)1);
+        PressKey(window.Handle, 0x0D);
         var watch = Stopwatch.StartNew();
         while (watch.ElapsedMilliseconds < 8000)
         {
@@ -148,6 +146,22 @@ internal static class Program
         Console.WriteLine($"Synthetic window moved: {actual?.VisualRect.X != window.VisualRect.X}; recorder exited: {recorder.HasExited}");
         throw new InvalidOperationException("Recorder did not persist the synthetic gesture.");
     }
+
+    private static void PressKey(nint ownedWindow, ushort key)
+    {
+        Require(GetForegroundWindow() == ownedWindow, "Synthetic input target lost foreground focus; no keys sent.");
+        var inputs = new[] { new Input { Type = 1, VirtualKey = key }, new Input { Type = 1, VirtualKey = key, Flags = 2 } };
+        Require(SendInput(2, inputs, Marshal.SizeOf<Input>()) == 2, "Synthetic keyboard input was not accepted.");
+    }
+    [StructLayout(LayoutKind.Explicit, Size = 40)] // Win64 INPUT; the union begins at byte 8.
+    private struct Input
+    {
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(8)] public ushort VirtualKey;
+        [FieldOffset(12)] public uint Flags;
+    }
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, Input[] inputs, int size);
 
     private sealed class SyntheticWindow : Form
     {
