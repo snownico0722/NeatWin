@@ -16,5 +16,8 @@
     <Compile Include="../NeatWin/Windows/NativeMethods.cs" Link="Shared/NativeMethods.cs" />
     <Compile Include="../NeatWin/Windows/WindowManager.cs" Link="Shared/WindowManager.cs" />
     <Compile Include="../NeatWin/Windows/AutomationGuard.cs" Link="Shared/AutomationGuard.cs" />
+    <Compile Include="../NeatWin/Core/LayoutPlan.cs" Link="Shared/LayoutPlan.cs" />
+    <Compile Include="../NeatWin/Core/OcclusionMetrics.cs" Link="Shared/OcclusionMetrics.cs" />
+    <Compile Include="../NeatWin/Core/ObservationContext.cs" Link="Shared/ObservationContext.cs" />
   </ItemGroup>
 </Project>
