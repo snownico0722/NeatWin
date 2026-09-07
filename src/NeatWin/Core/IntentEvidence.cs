@@ -118,7 +118,10 @@ public static class IntentEvidence
         if (observation.StartContext is not { Truncated: false } before ||
             observation.EndContext is not { Truncated: false } after ||
             observation.SettledContext is not { Truncated: false } settled) return [];
-        return after.Windows.Where(w => w.Id != observation.WindowId && w.Manageable && w.WorkArea == observation.WorkArea &&
+        if (!before.Windows.Any(w => w.Id == observation.WindowId) ||
+            !after.Windows.Any(w => w.Id == observation.WindowId) ||
+            !settled.Windows.Any(w => w.Id == observation.WindowId)) return [];
+        return after.Windows.Where(w => w.Id != observation.WindowId && w.Manageable && w.VisibleRatio > 0 && w.WorkArea == observation.WorkArea &&
             before.Windows.Any(b => b.Id == w.Id && b.Rect == w.Rect && b.WorkArea == w.WorkArea) &&
             settled.Windows.Any(b => b.Id == w.Id && b.Rect == w.Rect && b.WorkArea == w.WorkArea && b.Manageable))
             .Take(24).Select(w => w.Rect);
@@ -139,7 +142,7 @@ public static class IntentEvidence
             var overlap = Math.Min(o.End.Right, neighbor.Right) - Math.Max(o.End.Left, neighbor.Left);
             var ratio = overlap / (double)Math.Min(o.End.Width, neighbor.Width);
             if (o.End.VerticalOverlapRatio(neighbor) < 0.5 || ratio <= 0) continue;
-            var count = o.EndContext.Windows.Count(w => w.Manageable && w.WorkArea == o.WorkArea);
+            var count = o.EndContext.Windows.Count(w => w.Manageable && w.VisibleRatio > 0 && w.WorkArea == o.WorkArea);
             if (count is < 2 or > 8) continue;
             // Describe the relationship observed, not an assertion that its endpoint was optimal.
             return new(o.Time, ContextFor(o.WorkArea), count, ratio <= 0.25 ? "edge-overlap" : "stack", ratio);
