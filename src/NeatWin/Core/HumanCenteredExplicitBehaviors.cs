@@ -11,7 +11,7 @@ internal static class HumanCenteredExplicitBehaviors
         IReadOnlyList<VisibleWindow> visibleWindows,
         IReadOnlyList<TidyMove> basePlan,
         TidyOptions options,
-        SmartBehaviorOptions behavior)
+        SmartBehaviorOptions behavior, bool preservePlannedOverlap = false)
     {
         if (visibleWindows.Count == 0)
         {
@@ -38,7 +38,7 @@ internal static class HumanCenteredExplicitBehaviors
                 ApplyVerticalFill(states, options.SmartStrength);
             }
 
-            RemoveOnlyAccidentalOverlap(states, options.SmartStrength, options.RescueOffscreenWindows);
+            if (!preservePlannedOverlap) RemoveOnlyAccidentalOverlap(states, options.SmartStrength, options.RescueOffscreenWindows);
 
             foreach (var state in states)
             {
