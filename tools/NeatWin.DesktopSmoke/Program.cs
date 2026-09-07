@@ -90,7 +90,7 @@ internal static class Program
     private static void VerifyRecorder(string recorderPath, WindowSnapshot window, List<Process> children)
     {
         var started = DateTimeOffset.UtcNow;
-        var recorder = Process.Start(new ProcessStartInfo(Path.GetFullPath(recorderPath), "--tray") { UseShellExecute = false })
+        var recorder = Process.Start(new ProcessStartInfo(Path.GetFullPath(recorderPath)) { UseShellExecute = false })
             ?? throw new InvalidOperationException("Recorder did not start.");
         children.Add(recorder);
         Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
@@ -122,6 +122,19 @@ internal static class Program
                 }
             }
         }
+        recorder.Refresh();
+        if (!recorder.HasExited && recorder.MainWindowHandle != nint.Zero)
+        {
+            EnumChildWindows(recorder.MainWindowHandle, (child, _) =>
+            {
+                var text = new System.Text.StringBuilder(2048);
+                GetWindowText(child, text, text.Capacity);
+                if (text.Length > 0) Console.WriteLine("Recorder UI: " + text);
+                return true;
+            }, nint.Zero);
+        }
+        var actual = new WindowManager().Capture().FirstOrDefault(w => w.Handle == window.Handle);
+        Console.WriteLine($"Synthetic window moved: {actual?.VisualRect.X != window.VisualRect.X}; recorder exited: {recorder.HasExited}");
         throw new InvalidOperationException("Recorder did not persist the synthetic gesture.");
     }
 
@@ -153,6 +166,9 @@ internal static class Program
         }
     }
 
+    private delegate bool ChildCallback(nint child, nint data);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, ChildCallback callback, nint data);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint hwnd, System.Text.StringBuilder text, int size);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
