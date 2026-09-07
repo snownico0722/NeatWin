@@ -23,6 +23,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private SmartBehaviorOptions _smartBehaviorOptions;
     private readonly IntentReferenceStore _referenceStore = new();
     private IReadOnlyList<TidyMove> _undoPlan = [];
+    private IReadOnlyList<WindowLayerOrder> _undoLayers = [];
+    private readonly LayoutRunJournal _journal;
     private bool _autoTidyEnabled;
     private bool _tidyRunning;
 
@@ -33,6 +35,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _smartBehaviorOptions = _settingsStore.LoadSmartBehaviorOptions();
         _verticalFillManager = new ReversibleVerticalFillManager();
         _autoTidyManager = new AutoTidyManager();
+        _journal = new LayoutRunJournal(_windowManager, _referenceStore);
+        _autoTidyManager.GestureObserved += gesture => _journal.MarkGesture(gesture.WindowHandle);
         _autoTidyEnabled = _settingsStore.LoadAutoTidyEnabled() && _autoTidyManager.IsAvailable;
         _autoTidyManager.Enabled = _autoTidyEnabled;
         _autoTidyManager.TidyRequested += OnFollowHandRequested;
@@ -87,6 +91,10 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             _mainWindow.SetHotkeyRegistration(requestedHotkey, success: false, hotkeyMessage);
         }
 
+        _mainWindow.Text = "NeatWin · 叠边与层级 v2";
+        _mainWindow.HandleCreated += (_, _) => AutomationGuard.MarkUtility(_mainWindow.Handle);
+        AutomationGuard.MarkUtility(_mainWindow.Handle);
+        _journal.Completed += OnLayoutVerified;
         _mainWindow.Show();
     }
 
@@ -98,6 +106,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             _autoTidyManager.TidyRequested -= OnFollowHandRequested;
             _hotkeyWindow.Dispose();
             _autoTidyManager.Dispose();
+            _journal.Dispose();
             _verticalFillManager.Dispose();
             _mainWindow.Dispose();
             _trayIcon.Visible = false;
@@ -232,7 +241,9 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             }
 
             _autoTidyManager.SuppressFor(500);
-            _windowManager.Apply([new TidyMove(moved.Window, decision.TargetRect)]);
+            var assisted = new[] { new TidyMove(moved.Window, decision.TargetRect) };
+            _windowManager.Apply(assisted);
+            _journal.Record(snapshot, new(assisted, [], []), "follow-hand", []);
         }
         catch
         {
@@ -249,7 +260,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
     private void RunTidy(bool showActivity)
     {
-        if (_tidyRunning)
+        if (_tidyRunning || (_autoTidyManager.IsGestureActive || NativeWindowActivity.IsMoving))
         {
             return;
         }
@@ -258,7 +269,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         try
         {
             var snapshot = _windowManager.Capture();
-            var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot);
+            var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot,
+                includeStackAccess: _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart);
 
             VideoBlackBarHint? videoHint = null;
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
@@ -268,15 +280,18 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             }
 
             IReadOnlyList<TidyMove> plan;
+            IntentLayoutPlan? detailed = null;
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
             {
-                plan = IntentLayoutPlanner.CreatePlan(visibleWorkingSet, _tidyOptions, _referenceStore.Read());
+                detailed = IntentLayoutPlanner.CreateDetailedPlan(visibleWorkingSet, _tidyOptions, _referenceStore.Read(), snapshot);
+                plan = detailed.Moves;
+                var intendedPlan = plan;
 
                 plan = HumanCenteredExplicitBehaviors.Refine(
                     visibleWorkingSet,
                     plan,
                     _tidyOptions,
-                    _smartBehaviorOptions);
+                    _smartBehaviorOptions, preservePlannedOverlap: true);
 
                 var beforeVideoPlan = plan;
                 plan = VideoAspectPostProcessor.Refine(
@@ -285,6 +300,9 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                     _tidyOptions,
                     _smartBehaviorOptions,
                     videoHint);
+
+                if (!IntentLayoutPlanner.RefinementPreservesExposure(visibleWorkingSet, intendedPlan, plan, detailed.Layers))
+                    plan = intendedPlan;
 
                 if (videoHint is not null)
                 {
@@ -309,25 +327,30 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                 plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
             }
 
+            detailed = detailed is null ? new(plan, [], []) : detailed with { Moves = plan };
+            _autoTidyManager.SuppressFor(650);
+            var application = _windowManager.ApplyLayout(detailed);
+            detailed = application.Plan;
+            plan = detailed.Moves;
             _verticalFillManager.Track(
                 plan,
                 _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart &&
                 _smartBehaviorOptions.PreferReversibleVerticalFill);
 
-            if (plan.Count > 0)
+            var layerOrders = detailed.Layers;
+            if (plan.Count > 0 || layerOrders.Count > 0)
             {
-                _autoTidyManager.SuppressFor(650);
-                _windowManager.Apply(plan);
-
                 _undoPlan = plan;
+                _undoLayers = layerOrders;
             }
-
+            _journal.Record(snapshot, detailed, showActivity ? "explicit" : "classic-follow", application.Notes);
             if (showActivity)
             {
-                var message = plan.Count == 0
+                var kinds = string.Join("、", detailed.Groups.Select(g => KindName(g.Selected)).Distinct());
+                var message = plan.Count == 0 && layerOrders.Count == 0
                     ? $"已检查 {visibleWorkingSet.Count} 个当前可见窗口，没有需要调整的地方。"
-                    : $"整理完成：检查 {visibleWorkingSet.Count} 个当前可见窗口，调整 {plan.Count} 个。";
-                _mainWindow.SetActivity(message);
+                    : $"{kinds}：已请求调整 {plan.Count} 个窗口、{layerOrders.Count} 组层级。";
+                _mainWindow.SetActivity(application.Notes.Any(n => n.Contains("未")) ? message + " " + string.Join(" ", application.Notes) : message);
             }
         }
         catch (Exception exception)
@@ -351,7 +374,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
     private void UndoTidy()
     {
-        if (_tidyRunning || _undoPlan.Count == 0)
+        if (_tidyRunning || (_autoTidyManager.IsGestureActive || NativeWindowActivity.IsMoving) || (_undoPlan.Count == 0 && _undoLayers.Count == 0))
         {
             _mainWindow.SetActivity("没有可撤销的整理。");
             return;
@@ -366,13 +389,38 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                     window.MonitorHandle == move.Window.MonitorHandle && window.WorkArea == move.Window.WorkArea &&
                     SameRect(window.VisualRect, move.TargetVisualRect))
                     reverse.Add(new TidyMove(window, move.Window.VisualRect));
+            var reverseLayers = _undoLayers.Where(l => WindowLayerSafety.MatchesOrder(l, current.Values.ToArray()) &&
+                l.FrontToBack.All(w => current.TryGetValue(w.Handle, out var now) && now.ProcessId == w.ProcessId &&
+                    SameRect(now.VisualRect, _undoPlan.FirstOrDefault(m => m.Window.Handle == w.Handle)?.TargetVisualRect ?? w.VisualRect)))
+                .Select(l => new WindowLayerOrder(l.FrontToBack.OrderBy(w => w.ZOrder).ToArray())).ToArray();
             _autoTidyManager.SuppressFor(650);
-            _windowManager.Apply(reverse);
-            var skipped = _undoPlan.Count - reverse.Count;
+            var application = _windowManager.ApplyLayout(new(reverse, reverseLayers, []));
+            _journal.Record(current.Values.ToArray(), application.Plan, "undo", application.Notes);
+            var skipped = _undoPlan.Count - application.Plan.Moves.Count;
             _undoPlan = [];
-            _mainWindow.SetActivity($"已还原 {reverse.Count} 个窗口；跳过 {skipped} 个已再次调整、关闭或状态改变的窗口。");
+            _undoLayers = [];
+            _mainWindow.SetActivity($"已请求还原 {application.Plan.Moves.Count} 个窗口；跳过 {skipped} 个已再次调整、关闭或状态改变的窗口。");
         }
         catch (Exception ex) { _mainWindow.SetActivity($"撤销失败：{ex.Message}", error: true); }
+    }
+
+    private static string KindName(string kind) => kind switch
+    {
+        "edge-row" => "叠边并排", "stack" => "成组叠放", "restack" => "调整前后层级",
+        "columns" => "左右排布", "rows" => "上下排布", "grid" => "多行排布", "local" => "局部微调", _ => "保留当前关系",
+    };
+
+    private void OnLayoutVerified(LayoutRunObservation observation)
+    {
+        if (observation.Trigger != "explicit" || observation.Actual is null || observation.Outcome == "intervened") return;
+        var actual = observation.Actual.Windows;
+        var matched = observation.Targets.Count(t => actual.Any(w => w.Id == t.Id && SameRect(w.Rect, t.Target)));
+        var description = string.Join("、", observation.Groups.Select(g => KindName(g.Selected)).Distinct());
+        _mainWindow.SetActivity(observation.Outcome == "observed-match"
+            ? $"{description}：已确认 {matched} 个窗口的目标位置；层级已核对。"
+            : $"{description}：{matched}/{observation.Targets.Length} 个位置匹配；其余可能被应用限制，诊断已记录。");
+        if (observation.ApplyNotes.Any(n => n.Contains("未执行") || n.Contains("未套用") || n.Contains("未覆盖")))
+            _mainWindow.SetActivity(string.Join(" ", observation.ApplyNotes));
     }
 
     private void OpenRecorder()
