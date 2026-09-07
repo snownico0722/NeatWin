@@ -96,7 +96,17 @@ internal static class Program
         recorder.ErrorDataReceived += (_, e) => { if (e.Data is not null) Console.WriteLine("Recorder event: " + e.Data); };
         recorder.BeginErrorReadLine();
         Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
-        Thread.Sleep(600);
+        // Input-idle can be reached by a startup/helper message loop before the constructor
+        // installs its hooks. The recorder shows its normal panel only after initialization.
+        var readiness = Stopwatch.StartNew();
+        do
+        {
+            Thread.Sleep(100);
+            recorder.Refresh();
+            Require(!recorder.HasExited, "Recorder exited during initialization.");
+        } while ((recorder.MainWindowHandle == nint.Zero || !recorder.MainWindowTitle.Contains("习惯记录器 v2")) && readiness.ElapsedMilliseconds < 15000);
+        Require(recorder.MainWindowHandle != nint.Zero && recorder.MainWindowTitle.Contains("习惯记录器 v2"), "Recorder did not show its initialized panel.");
+        Thread.Sleep(150);
         Require(window.IsManageable, "Synthetic window is not manageable.");
         // Ask the synthetic child to enter the system move loop; system-only events are not forged.
         Require(PostMessage(window.Handle, 0x8005, nint.Zero, nint.Zero), "Synthetic lifecycle request failed.");
