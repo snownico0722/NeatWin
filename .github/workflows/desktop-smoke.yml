@@ -1,0 +1,42 @@
+name: Desktop smoke
+
+on:
+  push:
+    branches:
+      - agent/**
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-window-checks:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build independent recorder
+        run: dotnet build src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release
+      - name: Build native harness
+        run: dotnet build tools/NeatWin.DesktopSmoke/NeatWin.DesktopSmoke.csproj -c Release
+      - name: Run isolated native checks
+        shell: pwsh
+        run: |
+          $recorder = (Resolve-Path 'src/NeatWin.Recorder/bin/Release/net8.0-windows10.0.19041.0/NeatWin.Recorder.exe').Path
+          & 'tools/NeatWin.DesktopSmoke/bin/Release/net8.0-windows10.0.19041.0/NeatWin.DesktopSmoke.exe' $recorder 2>&1 | Tee-Object -FilePath desktop-smoke.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain check output only (no captured desktop data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-desktop-smoke-results
+          path: desktop-smoke.txt
+          if-no-files-found: warn
+          retention-days: 14
