@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using NeatWin.Reference;
 using NeatWin.Core;
 using NeatWin.Windows;
 
@@ -38,6 +40,11 @@ internal static class Program
                 windows = manager.Capture().Where(w => ids.Contains(w.ProcessId)).ToArray();
             } while (windows.Length != 3 && watch.ElapsedMilliseconds < 5000);
             Require(windows.Length == 3, "Could not capture all three synthetic windows.");
+            if (args.Length == 1)
+            {
+                VerifyRecorder(args[0], windows[0], children);
+                windows = manager.Capture().Where(w => ids.Contains(w.ProcessId)).ToArray();
+            }
             // Only rearrange children created by this test; unrelated desktop windows are untouched.
             for (var i = 1; i < windows.Length; i++)
                 Require(SetWindowPos(windows[i].Handle, windows[i - 1].Handle, 0, 0, 0, 0, 0x213), "Initial order setup failed.");
@@ -78,6 +85,48 @@ internal static class Program
             }
         }
     }
+    private static void VerifyRecorder(string recorderPath, WindowSnapshot window, List<Process> children)
+    {
+        var started = DateTimeOffset.UtcNow;
+        var recorder = Process.Start(new ProcessStartInfo(Path.GetFullPath(recorderPath), "--tray") { UseShellExecute = false })
+            ?? throw new InvalidOperationException("Recorder did not start.");
+        children.Add(recorder);
+        Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
+        Thread.Sleep(600);
+        NotifyWinEvent(0x000A, window.Handle, 0, 0);
+        Thread.Sleep(250);
+        var r = window.OuterRect;
+        Require(SetWindowPos(window.Handle, nint.Zero, r.X + 30, r.Y, r.Width, r.Height, 0x215), "Synthetic move failed.");
+        Thread.Sleep(250);
+        NotifyWinEvent(0x000B, window.Handle, 0, 0);
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < 8000)
+        {
+            Thread.Sleep(200);
+            foreach (var path in Directory.Exists(IntentReferenceStore.DefaultDirectory)
+                ? Directory.GetFiles(IntentReferenceStore.DefaultDirectory, "adjustments-*.jsonl") : [])
+            {
+                using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+                while (reader.ReadLine() is string line)
+                {
+                    WindowAdjustmentObservation? observation;
+                    try { observation = JsonSerializer.Deserialize<WindowAdjustmentObservation>(line); }
+                    catch (JsonException) { continue; }
+                    if (observation is null || observation.Time < started || observation.Version != 2) continue;
+                    Require(observation.StartContext is not null && observation.EndContext is not null && observation.SettledContext is not null,
+                        "Recorder omitted before, after or settled context.");
+                    Require(observation.End.X != observation.Start.X, "Recorder lost the synthetic movement.");
+                    Require(!line.Contains("Process") && !line.Contains("Handle") && !line.Contains("Title"), "Native identities or titles leaked into record.");
+                    Console.WriteLine("PASS: independent recorder consumed synthetic move/size events and persisted v2 geometry/layer contexts without native IDs.");
+                    recorder.Kill(); recorder.WaitForExit(5000);
+                    return;
+                }
+            }
+        }
+        throw new InvalidOperationException("Recorder did not persist the synthetic gesture.");
+    }
+
+    [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint type, nint hwnd, int objectId, int childId);
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", SetLastError = true)]
