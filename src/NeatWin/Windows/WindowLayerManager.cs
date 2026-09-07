@@ -14,12 +14,12 @@ public sealed partial class WindowManager
             .GroupBy(w => w.Handle).Select(g => g.First()).ToArray();
         if (NativeWindowActivity.IsMoving || needed.Any(w => !current.Any(c => c.Handle == w.Handle &&
             c.ProcessId == w.ProcessId && c.WorkArea == w.WorkArea && c.MonitorHandle == w.MonitorHandle &&
-            c.IsManageable && Near(c.VisualRect, w.VisualRect))))
+            c.IsManageable && c.IsTopmost == w.IsTopmost && c.Dpi == w.Dpi && Near(c.VisualRect, w.VisualRect))))
             return new(plan with { Moves = [], Layers = [] }, ["桌面在规划后发生变化，本次未执行。"]);
 
         var notes = ApplyLayers(plan.Layers).ToList();
         var afterLayers = plan.Layers.Count == 0 ? current : Capture();
-        var failed = plan.Layers.Where(l => !WindowLayerSafety.MatchesOrder(l, afterLayers)).ToArray();
+        var failed = plan.Layers.Where(l => !WindowLayerSafety.CanReorder(l.FrontToBack, afterLayers) || !WindowLayerSafety.MatchesOrder(l, afterLayers)).ToArray();
         var failedHandles = failed.SelectMany(l => l.FrontToBack.Select(w => w.Handle)).ToHashSet();
         var accepted = plan with
         {
