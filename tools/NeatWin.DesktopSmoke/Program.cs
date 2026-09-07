@@ -96,7 +96,7 @@ internal static class Program
         Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
         Thread.Sleep(600);
         Require(window.IsManageable, "Synthetic window is not manageable.");
-        // The event must originate on the window's own server thread, as in an actual move loop.
+        // Ask the synthetic child to enter the system move loop; system-only events are not forged.
         Require(PostMessage(window.Handle, 0x8005, nint.Zero, nint.Zero), "Synthetic lifecycle request failed.");
         var watch = Stopwatch.StartNew();
         while (watch.ElapsedMilliseconds < 8000)
@@ -146,15 +146,21 @@ internal static class Program
             if (message.Msg == 0x8005 && _gesture is null)
             {
                 var stage = 0;
-                NotifyWinEvent(0x000A, Handle, 0, 0);
                 _gesture = new System.Windows.Forms.Timer { Interval = 250 };
                 _gesture.Tick += (_, _) =>
                 {
-                    if (stage++ == 0) { Left += 30; return; }
+                    if (stage++ < 3)
+                    {
+                        PostMessage(Handle, 0x0100, (nint)0x27, (nint)1); // VK_RIGHT inside SC_MOVE
+                        PostMessage(Handle, 0x0101, (nint)0x27, (nint)1);
+                        return;
+                    }
                     _gesture!.Stop(); _gesture.Dispose(); _gesture = null;
-                    NotifyWinEvent(0x000B, Handle, 0, 0);
+                    PostMessage(Handle, 0x0100, (nint)0x0D, (nint)1); // accept the system move
+                    PostMessage(Handle, 0x0101, (nint)0x0D, (nint)1);
                 };
                 _gesture.Start();
+                PostMessage(Handle, 0x0112, (nint)0xF010, nint.Zero); // WM_SYSCOMMAND / SC_MOVE
                 return;
             }
             base.WndProc(ref message);
@@ -172,7 +178,6 @@ internal static class Program
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
-    [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint type, nint hwnd, int objectId, int childId);
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll", SetLastError = true)]
