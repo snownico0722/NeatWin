@@ -135,6 +135,8 @@ internal sealed class RecorderContext : ApplicationContext
 
     private void OnWinEvent(nint hook, uint eventType, nint hwnd, int objectId, int childId, uint thread, uint time)
     {
+        if (Environment.GetEnvironmentVariable("NEATWIN_EVENT_DIAGNOSTICS") == "1")
+            Console.Error.WriteLine($"Move event {eventType}: object={objectId}, child={childId}, paused={_paused}, disposed={_disposed}, reentrant={_handlingEvent}");
         if (_disposed || _paused || _handlingEvent || hwnd == nint.Zero || objectId != 0 || childId != 0) return;
         _handlingEvent = true;
         try
@@ -146,7 +148,11 @@ internal sealed class RecorderContext : ApplicationContext
                 _active = null;
                 var snapshot = _manager.Capture();
                 var start = snapshot.FirstOrDefault(w => w.Handle == hwnd && w.IsManageable);
-                if (start is null) return;
+                if (start is null)
+                {
+                    if (Environment.GetEnvironmentVariable("NEATWIN_EVENT_DIAGNOSTICS") == "1") Console.Error.WriteLine("Start excluded by window capture.");
+                    return;
+                }
                 NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
                 _active = new Active(start, pid, Environment.TickCount64, _identity.Capture(snapshot),
                     AutomationGuard.Stamp(hwnd), AutomationGuard.IsMarked(hwnd));
