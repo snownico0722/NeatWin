@@ -14,7 +14,8 @@ public sealed record WindowSnapshot(
     bool IsManageable,
     int ZOrder,
     uint Dpi = 96,
-    uint ProcessId = 0);
+    uint ProcessId = 0,
+    bool IsTopmost = false);
 
 public sealed record VisibleWindow(
     WindowSnapshot Window,
