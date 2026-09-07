@@ -28,7 +28,8 @@ internal static class Program
                 var child = Process.Start(new ProcessStartInfo(exe, $"--child {i}") { UseShellExecute = false })
                     ?? throw new InvalidOperationException("Child did not start.");
                 children.Add(child);
-                Require(child.WaitForInputIdle(15000), "Child did not reach its message loop.");
+                // Console-subsystem helper processes can create WinForms later; readiness is
+                // established by the actual captured windows below, not WaitForInputIdle.
             }
             var manager = new WindowManager();
             var ids = children.Select(p => (uint)p.Id).ToHashSet();
@@ -37,6 +38,7 @@ internal static class Program
             do
             {
                 Thread.Sleep(100);
+                Require(children.All(p => !p.HasExited), "A synthetic child exited before creating its window.");
                 windows = manager.Capture().Where(w => ids.Contains(w.ProcessId)).ToArray();
             } while (windows.Length != 3 && watch.ElapsedMilliseconds < 5000);
             Require(windows.Length == 3, "Could not capture all three synthetic windows.");
