@@ -98,6 +98,17 @@ internal static class Program
         Require(window.IsManageable, "Synthetic window is not manageable.");
         // Ask the synthetic child to enter the system move loop; system-only events are not forged.
         Require(PostMessage(window.Handle, 0x8005, nint.Zero, nint.Zero), "Synthetic lifecycle request failed.");
+        // A modal system move loop need not dispatch WinForms timers. Drive its window-targeted
+        // keyboard messages from the parent process rather than relying on a child timer.
+        Thread.Sleep(300);
+        for (var step = 0; step < 4; step++)
+        {
+            PostMessage(window.Handle, 0x0100, (nint)0x27, (nint)1);
+            PostMessage(window.Handle, 0x0101, (nint)0x27, (nint)1);
+            Thread.Sleep(150);
+        }
+        PostMessage(window.Handle, 0x0100, (nint)0x0D, (nint)1);
+        PostMessage(window.Handle, 0x0101, (nint)0x0D, (nint)1);
         var watch = Stopwatch.StartNew();
         while (watch.ElapsedMilliseconds < 8000)
         {
@@ -140,35 +151,15 @@ internal static class Program
 
     private sealed class SyntheticWindow : Form
     {
-        private System.Windows.Forms.Timer? _gesture;
         protected override void WndProc(ref Message message)
         {
-            if (message.Msg == 0x8005 && _gesture is null)
+            if (message.Msg == 0x8005)
             {
-                var stage = 0;
-                _gesture = new System.Windows.Forms.Timer { Interval = 250 };
-                _gesture.Tick += (_, _) =>
-                {
-                    if (stage++ < 3)
-                    {
-                        PostMessage(Handle, 0x0100, (nint)0x27, (nint)1); // VK_RIGHT inside SC_MOVE
-                        PostMessage(Handle, 0x0101, (nint)0x27, (nint)1);
-                        return;
-                    }
-                    _gesture!.Stop(); _gesture.Dispose(); _gesture = null;
-                    PostMessage(Handle, 0x0100, (nint)0x0D, (nint)1); // accept the system move
-                    PostMessage(Handle, 0x0101, (nint)0x0D, (nint)1);
-                };
-                _gesture.Start();
-                PostMessage(Handle, 0x0112, (nint)0xF010, nint.Zero); // WM_SYSCOMMAND / SC_MOVE
+                Activate();
+                PostMessage(Handle, 0x0112, (nint)0xF010, nint.Zero); // SC_MOVE; input is posted by the parent
                 return;
             }
             base.WndProc(ref message);
-        }
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) _gesture?.Dispose();
-            base.Dispose(disposing);
         }
     }
 
