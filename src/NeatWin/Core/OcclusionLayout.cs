@@ -56,8 +56,10 @@ internal static partial class IntentLayoutPlanner
         void AddDeck(int dx, int dy)
         {
             if (dx <= 0 && dy <= 0) return;
-            var width = maxWidth + dx * (count - 1);
-            var height = maxHeight + dy * (count - 1);
+            // Use the actual footprint, not max-size + all offsets: unequal windows otherwise
+            // recenter an imaginary larger deck and drift on repeated tidy.
+            var width = indices.Select((i, position) => position * dx + original[i].Width).Max();
+            var height = indices.Select((i, position) => position * dy + original[i].Height).Max();
             var bounds = Bounds(original);
             var x = Math.Clamp((int)Math.Round(CenterX(bounds) - width / 2.0), area.Left, area.Right - width);
             var y = Math.Clamp((int)Math.Round(CenterY(bounds) - height / 2.0), area.Top, area.Bottom - height);
