@@ -10,7 +10,7 @@ public sealed record RelationReferenceSample(DateTimeOffset Time, string Context
     string Kind, double OverlapRatio);
 public sealed record PlannedWindow(int Id, RectI Target);
 public sealed record PlannedGroup(int[] Ids, string Selected, double StackEvidence,
-    LayoutCandidateTrace[] Candidates);
+    LayoutCandidateTrace[] Candidates, TaskGroupExplanation? Task = null);
 public sealed record LayoutRunObservation(int Version, string Session, string RequestId, string Trigger,
     WorkspaceFrame Before, PlannedWindow[] Targets, int[][] Layers, PlannedGroup[] Groups,
     WorkspaceFrame? Actual, string Outcome, string[] ApplyNotes);
@@ -43,7 +43,7 @@ public sealed class ObservationIdentityTracker
     {
         var result = new List<ObservedWindow>();
         var ordered = snapshot.OrderBy(w => w.ZOrder).ToArray();
-        // Occluders may include unmanageable windows. Never misreport their covered area as visible.
+        // Occluders may include unmanageable windows. Never misreport covered area as visible.
         foreach (var window in ordered.Take(64))
         {
             var rect = window.VisualRect.Intersect(window.WorkArea);

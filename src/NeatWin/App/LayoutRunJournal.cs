@@ -4,7 +4,7 @@ using NeatWin.Windows;
 
 namespace NeatWin.App;
 
-/// <summary>Explicit operations only. Requested targets are not evidence of successful placement.</summary>
+/// <summary>Requested targets are not evidence of successful placement.</summary>
 internal sealed class LayoutRunJournal : IDisposable
 {
     private readonly WindowManager _manager;
@@ -36,7 +36,7 @@ internal sealed class LayoutRunJournal : IDisposable
             var targets = plan.Moves.Select(m => new PlannedWindow(ids[m.Window.Handle], m.TargetVisualRect)).ToArray();
             var layers = plan.Layers.Select(l => l.FrontToBack.Select(w => ids[w.Handle]).ToArray()).ToArray();
             var groups = plan.Groups.Select(g => new PlannedGroup(g.Handles.Select(h => ids[h]).ToArray(),
-                g.Selected, g.StackEvidence, g.Candidates)).ToArray();
+                g.Selected, g.StackEvidence, g.Candidates, g.Task)).ToArray();
             var observation = new LayoutRunObservation(2, _session, Guid.NewGuid().ToString("N"), trigger,
                 frame, targets, layers, groups, null, "requested-not-yet-verified", notes);
             _store.AppendPlan(observation);
@@ -45,7 +45,7 @@ internal sealed class LayoutRunJournal : IDisposable
             _pending.Add(new(observation, before.Select(w => w.Handle).ToHashSet(), Environment.TickCount64));
             _timer.Start();
         }
-        catch { } // Diagnostics are best effort and must not prevent a layout or an undo.
+        catch { } // Diagnostics must not prevent a layout or an undo.
     }
 
     private void CompleteDue()

@@ -19,5 +19,6 @@
     <Compile Include="../NeatWin/Core/LayoutPlan.cs" Link="Shared/LayoutPlan.cs" />
     <Compile Include="../NeatWin/Core/OcclusionMetrics.cs" Link="Shared/OcclusionMetrics.cs" />
     <Compile Include="../NeatWin/Core/ObservationContext.cs" Link="Shared/ObservationContext.cs" />
+    <Compile Include="../NeatWin/Core/TaskLayoutEvidence.cs" Link="Shared/TaskLayoutEvidence.cs" />
   </ItemGroup>
 </Project>
