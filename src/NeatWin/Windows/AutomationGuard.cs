@@ -14,6 +14,10 @@ internal static class AutomationGuard
         _ = SetProp(hwnd, PropertyName, (nint)(long)(expiry == 0 ? 1u : expiry));
     }
 
+    internal static nint Stamp(nint hwnd) => GetProp(hwnd, PropertyName);
+    internal static bool IsUtility(nint hwnd) => GetProp(hwnd, "NeatWin.Utility.v1") != nint.Zero;
+    internal static void MarkUtility(nint hwnd) => SetProp(hwnd, "NeatWin.Utility.v1", (nint)1);
+
     internal static bool IsMarked(nint hwnd)
     {
         var value = GetProp(hwnd, PropertyName);

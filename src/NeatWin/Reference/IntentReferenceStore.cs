@@ -49,9 +49,12 @@ public sealed class IntentReferenceStore
         using (var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.Read)))
             writer.WriteLine(JsonSerializer.Serialize(observation));
         var sample = IntentEvidence.Extract(observation);
-        if (sample is not null)
+        var relation = IntentEvidence.ExtractRelation(observation);
+        if (sample is not null || relation is not null)
         {
-            var document = IntentEvidence.Add(Read(respectEnabled: false), sample, DateTimeOffset.UtcNow);
+            var document = Read(respectEnabled: false);
+            if (sample is not null) document = IntentEvidence.Add(document, sample, DateTimeOffset.UtcNow);
+            if (relation is not null) document = IntentEvidence.AddRelation(document, relation, DateTimeOffset.UtcNow);
             var temporary = ProfilePath + ".tmp";
             using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
             {
@@ -69,7 +72,7 @@ public sealed class IntentReferenceStore
     public void Clear()
     {
         if (!Directory.Exists(_directory)) return;
-        foreach (var path in Directory.EnumerateFiles(_directory, "adjustments-*.jsonl")) File.Delete(path);
+        foreach (var path in LogFiles()) File.Delete(path);
         File.Delete(ProfilePath);
         File.Delete(ProfilePath + ".tmp");
     }
@@ -78,23 +81,52 @@ public sealed class IntentReferenceStore
     {
         using var archive = ZipFile.Open(destination, ZipArchiveMode.Create);
         if (Directory.Exists(_directory))
-            foreach (var file in Directory.EnumerateFiles(_directory, "adjustments-*.jsonl"))
-                archive.CreateEntryFromFile(file, Path.GetFileName(file));
+            foreach (var file in LogFiles())
+            {
+                try
+                {
+                    using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var output = archive.CreateEntry(Path.GetFileName(file)).Open();
+                    input.CopyTo(output);
+                }
+                catch (FileNotFoundException) { }
+            }
         using var writer = new StreamWriter(archive.CreateEntry("intent-reference.json").Open());
         writer.Write(JsonSerializer.Serialize(Read(respectEnabled: false)));
+    }
+
+    private IEnumerable<string> LogFiles() => new[] { "adjustments-*.jsonl", "workspace-*.jsonl", "plans-*.jsonl" }
+        .SelectMany(pattern => Directory.EnumerateFiles(_directory, pattern));
+
+    public void AppendTransition(WorkspaceTransition observation) => AppendJson("workspace", observation);
+    public void AppendPlan(LayoutRunObservation observation) => AppendJson("plans", observation);
+
+    private void AppendJson<T>(string prefix, T value)
+    {
+        Directory.CreateDirectory(_directory);
+        var index = 0; string path;
+        do { path = Path.Combine(_directory, $"{prefix}-{DateTime.UtcNow:yyyyMMdd}-{index++:D3}.jsonl"); }
+        while (File.Exists(path) && new FileInfo(path).Length > 2 * 1024 * 1024 && index < 1000);
+        using (var writer = new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read)))
+            writer.WriteLine(JsonSerializer.Serialize(value));
+        Prune();
     }
 
     public void Prune()
     {
         if (!Directory.Exists(_directory)) return;
-        var files = new DirectoryInfo(_directory).GetFiles("adjustments-*.jsonl")
+        var files = LogFiles().Select(p => new FileInfo(p)).Where(f => f.Exists)
             .OrderByDescending(f => f.LastWriteTimeUtc).ToArray();
         long retainedBytes = 0;
         for (var i = 0; i < files.Length; i++)
         {
-            retainedBytes += files[i].Length;
-            if (i >= 16 || retainedBytes > 32L * 1024 * 1024 || files[i].LastWriteTimeUtc < DateTime.UtcNow.AddDays(-30))
-                files[i].Delete();
+            try
+            {
+                retainedBytes += files[i].Length;
+                if (i >= 32 || retainedBytes > 32L * 1024 * 1024 || files[i].LastWriteTimeUtc < DateTime.UtcNow.AddDays(-30))
+                    files[i].Delete();
+            }
+            catch (FileNotFoundException) { } // Another writer may prune a closed log concurrently.
         }
     }
 }

@@ -1,18 +1,26 @@
 namespace NeatWin.Core;
 
 /// <summary>
-/// Arrange nearby working groups, not the entire monitor. Floating size and coarse spatial order
-/// are context, not a perfect target. Explicit tidy may resolve substantial accidental overlap;
-/// follow-hand assistance remains a separate small correction and never invokes this planner.
+/// Compare task-conditioned local layouts. A manual endpoint is evidence, not the optimum.
+/// Follow-hand assistance remains a separate small correction.
 /// </summary>
-internal static class IntentLayoutPlanner
+internal static partial class IntentLayoutPlanner
 {
     internal static IReadOnlyList<TidyMove> CreatePlan(IReadOnlyList<VisibleWindow> visible,
-        TidyOptions options, IntentReferenceDocument? reference = null)
+        TidyOptions options, IntentReferenceDocument? reference = null) =>
+        CreateDetailedPlan(visible, options, reference).Moves;
+
+    internal static IntentLayoutPlan CreateDetailedPlan(IReadOnlyList<VisibleWindow> visible,
+        TidyOptions options, IntentReferenceDocument? reference = null,
+        IReadOnlyList<WindowSnapshot>? desktop = null, TaskLayoutContext? taskContext = null)
     {
         if (options.AlgorithmMode == TidyAlgorithmMode.Classic)
-            return new TidyEngine().CreatePlan(visible, options);
+            return new(new TidyEngine().CreatePlan(visible, options), [], []);
+        taskContext ??= new TaskLayoutContext();
+        if (taskContext.VerifiedRepeat) return new([], [], []);
         var moves = new List<TidyMove>();
+        var layers = new List<WindowLayerOrder>();
+        var traces = new List<LayoutGroupTrace>();
         foreach (var monitor in visible.Where(v => v.Window.IsManageable && !v.Window.VisualRect.IsEmpty)
             .GroupBy(v => v.Window.MonitorHandle))
         {
@@ -24,49 +32,78 @@ internal static class IntentLayoutPlanner
             foreach (var group in Groups(all, reach))
             {
                 var hint = IntentEvidence.Resolve(reference, area, group[0].Window.Dpi, DateTimeOffset.UtcNow);
-                var original = group.Select(v => Fit(v.Window.VisualRect, v.Window, options)).ToArray();
-                var candidates = new List<RectI[]> { original };
-                // Retain the previous version's useful exact local corrections as a candidate.
+                var original = group.Select(v => v.Window.VisualRect).ToArray();
+                var task = InferTask(group, original, taskContext);
+                var order = Enumerable.Range(0, group.Length).ToArray();
+                var blockers = desktop?.Where(w => !all.Any(v => v.Window.Handle == w.Handle) &&
+                    w.MonitorHandle == group[0].Window.MonitorHandle && w.ZOrder < group.Max(v => v.Window.ZOrder)).ToArray() ?? [];
+                var obstacles = desktop?.Where(w => !group.Any(v => v.Window.Handle == w.Handle) &&
+                    w.MonitorHandle == group[0].Window.MonitorHandle).ToArray() ?? [];
+                var generationNotes = new List<LayoutCandidateTrace>();
+                var candidates = new List<Candidate> { new("keep", original, order) };
+                var rescue = group.Select(v => Fit(v.Window.VisualRect, v.Window, options)).ToArray();
+                if (!rescue.SequenceEqual(original)) candidates.Add(new("rescue", rescue, order));
                 var local = new TidyEngine().CreatePlan(group, options).ToDictionary(m => m.Window.Handle, m => m.TargetVisualRect);
-                candidates.Add(group.Select((v, i) => local.GetValueOrDefault(v.Window.Handle, original[i])).ToArray());
+                candidates.Add(new("local", group.Select((v, i) => local.GetValueOrDefault(v.Window.Handle, original[i])).ToArray(), order));
                 if (group.Length is >= 2 and <= 12)
                 {
-                    AddPacked(candidates, group, original, area, hint.GapPixels, columns: group.Length, equalize: false);
-                    AddPacked(candidates, group, original, area, hint.GapPixels, columns: group.Length, equalize: true);
-                    AddPacked(candidates, group, original, area, hint.GapPixels, columns: 1, equalize: false);
-                    if (group.Length >= 3)
-                        for (var columns = 2; columns < group.Length; columns++)
-                            AddPacked(candidates, group, original, area, hint.GapPixels, columns, equalize: false);
+                    AddPackedCandidate("columns", group.Length, false);
+                    AddPackedCandidate("columns", group.Length, true);
+                    AddPackedCandidate("rows", 1, false);
+                    for (var columns = 2; columns < group.Length; columns++)
+                        AddPackedCandidate("grid", columns, false);
+                    AddOverlapping(candidates, group, original, area, hint);
+                    AddOrders(candidates, "restack", original, group);
+                    AddTaskCandidates(candidates, group, original, area, task, taskContext);
                 }
-                var baseline = Score(group, original, original, hint, options);
-                var bestScore = baseline;
-                var best = original;
+                var stackSignal = StackSignal(group, original);
+                TaskCostBreakdown Breakdown(Candidate c) => TaskCost(group, original, c, task, area, taskContext, hint, obstacles);
+                double Cost(Candidate c) => Breakdown(c).Total;
+                candidates = candidates.DistinctBy(c => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order)).ToList();
+                var best = candidates[0]; var baseline = Cost(best); var bestScore = baseline;
+                var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, Breakdown(best)) };
                 foreach (var candidate in candidates.Skip(1))
                 {
-                    if (!Safe(group, original, candidate, area, options) ||
-                        HitsOutsideGroup(settled, group, original, candidate)) continue;
-                    var score = Score(group, original, candidate, hint, options);
+                    var rejection = !candidate.Order.SequenceEqual(order) &&
+                        !WindowLayerSafety.CanReorder(group.Select(v => v.Window).ToArray(), desktop ?? all.Select(v => v.Window).ToArray())
+                        ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles) ? "geometry-budget" :
+                        HitsOutsideGroup(settled, group, original, candidate.Rects) ? "other-group" :
+                        blockers.Any(w => candidate.Rects.Select((r, i) => r.Intersect(w.VisualRect).Area > original[i].Intersect(w.VisualRect).Area).Any(b => b)) ? "fixed-occluder" :
+                        null;
+                    if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection)); continue; }
+                    var score = Cost(candidate);
+                    audits.Add(new(candidate.Kind, score, null, Breakdown(candidate)));
                     var threshold = options.SmartStrength switch
                     {
-                        SmartTidyStrength.Gentle => 0.28,
-                        SmartTidyStrength.Assertive => 0.035,
-                        _ => 0.10,
+                        SmartTidyStrength.Gentle => 0.18,
+                        SmartTidyStrength.Assertive => 0.025,
+                        _ => 0.065,
                     };
-                    if (score < bestScore && score < baseline - threshold)
-                    {
-                        best = candidate;
-                        bestScore = score;
-                    }
+                    var needsRescue = options.RescueOffscreenWindows && original.Any(r =>
+                        r.Intersect(area).Area < r.Area * .90 || r.Top < area.Top || r.Bottom > area.Bottom);
+                    if ((score < bestScore && score < baseline - threshold) || (best.Kind == "keep" && needsRescue && candidate.Kind == "rescue"))
+                    { best = candidate; bestScore = score; }
                 }
                 for (var i = 0; i < group.Length; i++)
                 {
-                    settled[group[i].Window.Handle] = best[i];
-                    if (best[i] != group[i].Window.VisualRect)
-                        moves.Add(new TidyMove(group[i].Window, best[i]));
+                    settled[group[i].Window.Handle] = best.Rects[i];
+                    if (best.Rects[i] != group[i].Window.VisualRect) moves.Add(new(group[i].Window, best.Rects[i]));
+                }
+                if (!best.Order.SequenceEqual(order)) layers.Add(new(best.Order.Select(i => group[i].Window).ToArray()));
+                traces.Add(new(group.Select(v => v.Window.Handle).ToArray(), best.Kind, stackSignal, audits.ToArray(),
+                    new(task, taskContext.Calibration?.Matches(area, group[0].Window.Dpi) == true ? "calibrated-flat-screen-angle" : "normalized-distance-not-gaze",
+                        ["hypothesis-weights-not-calibrated-probabilities", "content-prior-not-semantic-recognition", "stable-is-not-satisfaction"])));
+
+                void AddPackedCandidate(string kind, int columns, bool equalize)
+                {
+                    var packed = new List<RectI[]>();
+                    AddPacked(packed, group, original, area, hint.GapPixels, columns, equalize);
+                    if (packed.Count == 0) generationNotes.Add(new(kind, null, "no-size-safe-packing"));
+                    foreach (var rects in packed) candidates.Add(new(kind, rects, order));
                 }
             }
         }
-        return moves;
+        return new(moves, layers, traces);
     }
 
     private static IEnumerable<VisibleWindow[]> Groups(VisibleWindow[] windows, double reach)
@@ -109,7 +146,6 @@ internal static class IntentLayoutPlanner
                 if (windows[i].Window.IsResizable && Math.Abs(median - sizes[i].Height) <= sizes[i].Height * 0.12)
                     sizes[i] = sizes[i] with { Height = median };
         }
-        // Only shrink to make the local group fit. Never expand two windows to fill an ultrawide.
         foreach (var row in rows)
         {
             var width = row.Sum(i => sizes[i].Width) + gap * (row.Length - 1);
@@ -148,72 +184,6 @@ internal static class IntentLayoutPlanner
             y += rowHeights[rowIndex] + gap;
         }
         candidates.Add(target);
-    }
-
-    private static double Score(VisibleWindow[] windows, RectI[] original, RectI[] target,
-        IntentHint hint, TidyOptions options)
-    {
-        var cost = 0.0;
-        var pairs = 0;
-        for (var i = 0; i < windows.Length; i++)
-        for (var j = i + 1; j < windows.Length; j++)
-        {
-            var a = target[i]; var b = target[j];
-            var oa = original[i]; var ob = original[j];
-            if (!Related(oa, ob, 260) && !Related(a, b, 260)) continue;
-            pairs++;
-            cost += 8.0 * a.Intersect(b).Area / Math.Max(1.0, Math.Min(a.Area, b.Area));
-            var horizontal = a.VerticalOverlapRatio(b) >= 0.3;
-            var vertical = a.HorizontalOverlapRatio(b) >= 0.3;
-            if (horizontal)
-            {
-                cost += Math.Min(1, Math.Min(Math.Abs(a.Top - b.Top), Math.Abs(a.Bottom - b.Bottom)) / 80.0);
-                var gap = CenterX(a) <= CenterX(b) ? b.Left - a.Right : a.Left - b.Right;
-                if (gap >= 0) cost += 1.8 * Math.Min(1, Math.Abs(gap - hint.GapPixels) / 160.0);
-            }
-            if (vertical)
-            {
-                cost += Math.Min(1, Math.Min(Math.Abs(a.Left - b.Left), Math.Abs(a.Right - b.Right)) / 80.0);
-                var gap = CenterY(a) <= CenterY(b) ? b.Top - a.Bottom : a.Top - b.Bottom;
-                if (gap >= 0) cost += 1.8 * Math.Min(1, Math.Abs(gap - hint.GapPixels) / 160.0);
-            }
-            var dx = CenterX(oa) - CenterX(ob); var dy = CenterY(oa) - CenterY(ob);
-            if (Math.Abs(dx) > Math.Abs(dy) * 1.4 && dx * (CenterX(a) - CenterX(b)) < 0) cost += 4;
-            if (Math.Abs(dy) > Math.Abs(dx) * 1.4 && dy * (CenterY(a) - CenterY(b)) < 0) cost += 4;
-            // An intentionally tiny tie-breaker, never a learned layout veto.
-            cost -= 0.08 * hint.Confidence * hint.HorizontalPreference * (horizontal ? 1 : -1);
-        }
-        cost /= Math.Max(1, pairs);
-        for (var i = 0; i < windows.Length; i++)
-        {
-            var a = original[i]; var b = target[i];
-            var distance = Math.Sqrt(Math.Pow(CenterX(a) - CenterX(b), 2) + Math.Pow(CenterY(a) - CenterY(b), 2));
-            var resistance = options.SmartStrength switch { SmartTidyStrength.Gentle => 2.2, SmartTidyStrength.Assertive => 0.75, _ => 1.2 };
-            cost += resistance * (windows[i].Window.IsForeground ? 1.4 : 1) * distance /
-                Math.Max(200, Math.Min(a.Width, a.Height)) / windows.Length;
-            cost += 0.8 * (Math.Abs(Math.Log(b.Width / (double)Math.Max(1, a.Width))) +
-                Math.Abs(Math.Log(b.Height / (double)Math.Max(1, a.Height)))) / windows.Length;
-        }
-        return cost;
-    }
-
-    private static bool Safe(VisibleWindow[] windows, RectI[] original, RectI[] target, RectI area, TidyOptions options)
-    {
-        var fraction = options.SmartStrength switch { SmartTidyStrength.Gentle => 0.08, SmartTidyStrength.Assertive => 0.30, _ => 0.20 };
-        var budget = Math.Sqrt((double)area.Width * area.Width + (double)area.Height * area.Height) * fraction;
-        for (var i = 0; i < windows.Length; i++)
-        {
-            var a = original[i]; var b = target[i];
-            if (b.IsEmpty || b.Intersect(area).Area != b.Area) return false;
-            if (!windows[i].Window.IsResizable && (b.Width != a.Width || b.Height != a.Height)) return false;
-            if (b.Width < Math.Min(a.Width, options.MinimumWidth) || b.Height < Math.Min(a.Height, options.MinimumHeight)) return false;
-            if (b.Width < a.Width * 0.75 || b.Width > a.Width * 1.20 || b.Height < a.Height * 0.75 || b.Height > a.Height * 1.20) return false;
-            if (Math.Abs(CenterX(a) - CenterX(b)) > budget || Math.Abs(CenterY(a) - CenterY(b)) > budget) return false;
-        }
-        for (var i = 0; i < windows.Length; i++)
-            for (var j = i + 1; j < windows.Length; j++)
-                if (target[i].Intersect(target[j]).Area > original[i].Intersect(original[j]).Area) return false;
-        return true;
     }
 
     private static bool HitsOutsideGroup(IReadOnlyDictionary<nint, RectI> settled, VisibleWindow[] group, RectI[] original, RectI[] target)

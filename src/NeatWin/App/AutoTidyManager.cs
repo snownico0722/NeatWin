@@ -74,6 +74,8 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
     internal event Action<ManualWindowGesture>? GestureObserved;
     internal event Action<ManualWindowGesture>? TidyRequested;
 
+    internal bool IsGestureActive => _activeGesture is not null;
+
     internal bool IsAvailable => _eventHook != nint.Zero;
 
     internal bool Enabled
@@ -414,6 +416,9 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     private AttentionState GetDecayedState(nint hwnd, long now)
     {
+        if (_attention.Count >= 512 && !_attention.ContainsKey(hwnd))
+            foreach (var key in _attention.OrderBy(pair => pair.Value.LastScoreTick).Take(128).Select(pair => pair.Key).ToArray())
+                _attention.Remove(key);
         var state = _attention.TryGetValue(hwnd, out var existing) ? existing : default;
         state.Score = Decayed(state.Score, state.LastScoreTick, now, 4300);
         state.Dwell = Decayed(state.Dwell, state.LastDwellTick, now, 3600);
