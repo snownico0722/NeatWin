@@ -16,14 +16,19 @@ public sealed class OcclusionIntentTests
         p.Moves.FirstOrDefault(m => m.Window.Handle == w.Handle)?.TargetVisualRect ?? w.VisualRect;
 
     [Fact]
-    public void WidthPressureCanUseEdgeOverlapInsteadOfShrinkingBothWindows()
+    public void WidthPressureCanUseEdgeOverlapWhenResizeIsDisabled()
     {
         var a = W(1, new(50, 80, 1400, 1120)); var b = W(2, new(920, 190, 1300, 1100));
-        var p = Plan(a, b);
-        Assert.Contains(p.Groups, g => g.Selected == "edge-row");
+        // v3 may choose useful resizing by default. This regression isolates the still-supported
+        // no-resize alternative rather than forcing an obsolete family name for every task.
+        var p = IntentLayoutPlanner.CreateDetailedPlan([V(a), V(b)], new(), desktop: [a, b],
+            taskContext: new(Profile: new(AllowUsefulResize: false)));
+        Assert.Contains(p.Groups.SelectMany(g => g.Candidates), c => c.Kind == "edge-row" && c.Rejection is null);
+        Assert.NotEmpty(p.Moves);
         Assert.Equal(a.VisualRect.Width, Target(a, p).Width);
         Assert.Equal(b.VisualRect.Width, Target(b, p).Width);
         Assert.True(Target(a, p).Intersect(Target(b, p)).Area > 0);
+        Assert.True(Target(a, p).Intersect(Target(b, p)).Area < a.VisualRect.Intersect(b.VisualRect).Area);
     }
 
     [Fact]
@@ -31,10 +36,12 @@ public sealed class OcclusionIntentTests
     {
         var area = new RectI(0, 0, 2200, 1200);
         var a = W(1, new(0, 80, 1600, 950), area); var b = W(2, new(1240, 160, 800, 850), area);
-        var p = Plan(a, b);
-        Assert.Contains(p.Groups, g => g.Selected == "edge-row");
+        var p = IntentLayoutPlanner.CreateDetailedPlan([V(a), V(b)], new(), desktop: [a, b],
+            taskContext: new(Profile: new(AllowUsefulResize: false)));
+        Assert.Contains(p.Groups.SelectMany(g => g.Candidates), c => c.Kind == "edge-row" && c.Rejection is null);
         Assert.Contains(p.Layers, l => l.FrontToBack[0].Handle == b.Handle);
         Assert.All(p.Layers.SelectMany(l => l.FrontToBack), w => Assert.False(w.IsTopmost));
+        Assert.True(a.IsForeground); Assert.False(b.IsForeground);
     }
 
     [Fact]

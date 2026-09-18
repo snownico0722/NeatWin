@@ -13,13 +13,11 @@ internal static partial class IntentLayoutPlanner
             .ThenBy(i => windows[i].Window.ZOrder).ToArray();
         var widthSum = original.Sum(r => r.Width);
         var overflow = widthSum - area.Width;
-        // Preserve comfortable widths: overlap is an alternative to shrinking, not a new mandate.
         if (overflow > 0 && overflow <= (count - 1) * original.Max(r => r.Width) * hint.MaximumEdgeOverlap)
         {
             var depth = (int)Math.Ceiling(overflow / (double)(count - 1));
             AddSpread("edge-row", depth, 0);
         }
-
         var hadOverlap = original.SelectMany((r, i) => original.Skip(i + 1).Select(b => r.Intersect(b).Area)).Any(a => a > 0);
         if (!hadOverlap) return;
         var maxWidth = original.Max(r => r.Width);
@@ -27,7 +25,6 @@ internal static partial class IntentLayoutPlanner
         if (maxWidth > area.Width || maxHeight > area.Height) return;
         var scale = windows[0].Window.Dpi / 96.0;
         var yStep = Math.Min((int)Math.Round(40 * scale), (area.Height - maxHeight) / (count - 1));
-        // A broad deck exposes working strips; a compact deck retains an already stacked intent.
         var xStep = Math.Min((int)Math.Round(original.Min(r => r.Width) * 0.48),
             (area.Width - maxWidth) / (count - 1));
         AddDeck(xStep, yStep);
@@ -38,7 +35,7 @@ internal static partial class IntentLayoutPlanner
         void AddSpread(string kind, int depth, int stepY)
         {
             var width = widthSum - depth * (count - 1);
-            var height = maxHeightOf(original) + stepY * (count - 1);
+            var height = original.Max(r => r.Height) + stepY * (count - 1);
             if (width > area.Width || height > area.Height) return;
             var bounds = Bounds(original);
             var x = Math.Clamp((int)Math.Round(CenterX(bounds) - width / 2.0), area.Left, area.Right - width);
@@ -56,8 +53,7 @@ internal static partial class IntentLayoutPlanner
         void AddDeck(int dx, int dy)
         {
             if (dx <= 0 && dy <= 0) return;
-            // Use the actual footprint, not max-size + all offsets: unequal windows otherwise
-            // recenter an imaginary larger deck and drift on repeated tidy.
+            // Actual footprint avoids drift from recentering an imaginary larger deck.
             var width = indices.Select((i, position) => position * dx + original[i].Width).Max();
             var height = indices.Select((i, position) => position * dy + original[i].Height).Max();
             var bounds = Bounds(original);
@@ -71,7 +67,6 @@ internal static partial class IntentLayoutPlanner
             }
             AddOrders(candidates, "stack", targets, windows);
         }
-        static int maxHeightOf(RectI[] rects) => rects.Max(r => r.Height);
     }
 
     private static void AddOrders(List<Candidate> candidates, string kind, RectI[] rects, VisibleWindow[] windows)
@@ -79,7 +74,6 @@ internal static partial class IntentLayoutPlanner
         var natural = Enumerable.Range(0, windows.Length).ToArray();
         candidates.Add(new(kind, rects, natural));
         if (windows.Any(w => w.Window.IsTopmost) || windows.Length > 6) return;
-        // A finite set of relative-order alternatives. No always-on-top bit is changed.
         var orders = new List<int[]> { Enumerable.Reverse(natural).ToArray(),
             natural.OrderBy(i => rects[i].X).ToArray(), natural.OrderByDescending(i => rects[i].X).ToArray() };
         for (var i = 1; i < windows.Length; i++)
@@ -105,34 +99,6 @@ internal static partial class IntentLayoutPlanner
             if (closeX && dy is >= 22 and <= 130) votes++;
         }
         return pairs == 0 ? 0 : Math.Min(0.8, votes / (double)pairs);
-    }
-
-    private static double OcclusionCost(VisibleWindow[] windows, RectI[] original, Candidate candidate,
-        double stackSignal, IntentHint hint)
-    {
-        var cost = 0.0;
-        var front = new List<RectI>();
-        foreach (var i in candidate.Order)
-        {
-            var rect = candidate.Rects[i];
-            var exposure = OcclusionMetrics.Measure(rect, front, windows[i].Window.Dpi);
-            var compactStack = stackSignal >= 0.45;
-            cost += (compactStack ? 1.2 : 7.0) * (1 - exposure.CenterVisible) + 0.65 * (1 - exposure.Visible);
-            var accessNeed = Math.Min(rect.Width * 0.35, 160 * windows[i].Window.Dpi / 96.0);
-            cost += 1.8 * Math.Max(0, 1 - exposure.AccessWidth / Math.Max(1, accessNeed));
-            if (!compactStack)
-                cost += 1.6 * Math.Max(0, 0.55 - exposure.UsefulWidth / (double)rect.Width);
-            front.Add(rect);
-        }
-        cost /= windows.Length;
-        // Explicitly regular compact stacks should not be dissolved merely to maximize area.
-        if (stackSignal >= 0.45 && candidate.Kind is "columns" or "rows" or "grid") cost += 2.0 * stackSignal;
-        if (!candidate.Order.SequenceEqual(Enumerable.Range(0, windows.Length))) cost += 0.12;
-        if (candidate.Kind == "stack") cost -= Math.Min(0.08, hint.StackPreference);
-        // Losing usable size can be worse than covering a modest peripheral strip.
-        for (var i = 0; i < windows.Length; i++)
-            cost += 5 * Math.Max(0, 1 - candidate.Rects[i].Width / (double)original[i].Width) / windows.Length;
-        return cost;
     }
 
     internal static bool RefinementPreservesExposure(IReadOnlyList<VisibleWindow> visible,
