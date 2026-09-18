@@ -12,7 +12,10 @@ public sealed record WindowSnapshot(
     bool IsResizable,
     bool IsForeground,
     bool IsManageable,
-    int ZOrder);
+    int ZOrder,
+    uint Dpi = 96,
+    uint ProcessId = 0,
+    bool IsTopmost = false);
 
 public sealed record VisibleWindow(
     WindowSnapshot Window,

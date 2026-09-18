@@ -31,6 +31,8 @@ internal sealed class SettingsStore
             settings.Win);
     }
 
+    internal bool LoadAutoTidyEnabled() => LoadStoredSettings().AutoTidyEnabled ?? false;
+
     internal TidyOptions LoadTidyOptions()
     {
         var stored = LoadStoredSettings();
@@ -40,11 +42,8 @@ internal sealed class SettingsStore
         {
             AlgorithmMode = ReadEnum(stored.AlgorithmMode, defaults.AlgorithmMode),
             SmartStrength = ReadEnum(stored.SmartStrength, defaults.SmartStrength),
-            SmartHitTendency = ReadEnum(stored.SmartHitTendency, defaults.SmartHitTendency),
-            SmartSizeTendency = ReadEnum(stored.SmartSizeTendency, defaults.SmartSizeTendency),
-
-            // Raw solver fields are retained for Classic mode and for backward-compatible
-            // settings files. Smart mode derives its internal values from the intent profiles.
+            SmartHitTendency = SmartHitTendency.Balanced,
+            SmartSizeTendency = SmartSizeTendency.Balanced,
             PreserveLayoutWeight = Math.Clamp(stored.PreserveLayoutWeight ?? defaults.PreserveLayoutWeight, 0.10, 5.0),
             ResizeResistanceWeight = Math.Clamp(stored.ResizeResistanceWeight ?? defaults.ResizeResistanceWeight, 0.0, 5.0),
             OrderlinessWeight = Math.Clamp(stored.OrderlinessWeight ?? defaults.OrderlinessWeight, 0.10, 5.0),
@@ -67,8 +66,24 @@ internal sealed class SettingsStore
         return defaults with
         {
             PreferReversibleVerticalFill = stored.PreferReversibleVerticalFill ?? defaults.PreferReversibleVerticalFill,
-            OverlapAvoidance = ReadEnum(stored.SmartOverlapAvoidance, defaults.OverlapAvoidance),
+            OverlapAvoidance = SmartOverlapAvoidance.Balanced,
+            RemoveVideoBlackBars = stored.RemoveVideoBlackBars ?? defaults.RemoveVideoBlackBars,
+            VideoBlackBarTendency = ReadEnum(stored.VideoBlackBarTendency, defaults.VideoBlackBarTendency),
         };
+    }
+
+    internal SmartPersonalizationState LoadSmartPersonalization()
+    {
+        var stored = LoadStoredSettings();
+        var defaults = SmartPersonalizationState.Default;
+        return new SmartPersonalizationState(
+            stored.AutoFeatureWeights ?? defaults.AutoFeatureWeights,
+            stored.AutoArchetypeBias ?? defaults.AutoArchetypeBias,
+            stored.FollowTargetBias ?? defaults.FollowTargetBias,
+            stored.PreferredGapPixels ?? defaults.PreferredGapPixels,
+            stored.PreferredMainRatio ?? defaults.PreferredMainRatio,
+            stored.AutoCorrectionSamples ?? defaults.AutoCorrectionSamples,
+            stored.FollowGestureSamples ?? defaults.FollowGestureSamples).Normalize();
     }
 
     internal void SaveHotkey(HotkeyBinding binding)
@@ -82,14 +97,20 @@ internal sealed class SettingsStore
         WriteStoredSettings(settings);
     }
 
+    internal void SaveAutoTidyEnabled(bool enabled)
+    {
+        var settings = LoadStoredSettings();
+        settings.AutoTidyEnabled = enabled;
+        WriteStoredSettings(settings);
+    }
+
     internal void SaveTidyOptions(TidyOptions options)
     {
         var settings = LoadStoredSettings();
         settings.AlgorithmMode = (int)options.AlgorithmMode;
         settings.SmartStrength = (int)options.SmartStrength;
-        settings.SmartHitTendency = (int)options.SmartHitTendency;
-        settings.SmartSizeTendency = (int)options.SmartSizeTendency;
-
+        settings.SmartHitTendency = (int)SmartHitTendency.Balanced;
+        settings.SmartSizeTendency = (int)SmartSizeTendency.Balanced;
         settings.PreserveLayoutWeight = options.PreserveLayoutWeight;
         settings.ResizeResistanceWeight = options.ResizeResistanceWeight;
         settings.OrderlinessWeight = options.OrderlinessWeight;
@@ -109,7 +130,23 @@ internal sealed class SettingsStore
     {
         var settings = LoadStoredSettings();
         settings.PreferReversibleVerticalFill = options.PreferReversibleVerticalFill;
-        settings.SmartOverlapAvoidance = (int)options.OverlapAvoidance;
+        settings.SmartOverlapAvoidance = (int)SmartOverlapAvoidance.Balanced;
+        settings.RemoveVideoBlackBars = options.RemoveVideoBlackBars;
+        settings.VideoBlackBarTendency = (int)options.VideoBlackBarTendency;
+        WriteStoredSettings(settings);
+    }
+
+    internal void SaveSmartPersonalization(SmartPersonalizationState state)
+    {
+        state = state.Normalize();
+        var settings = LoadStoredSettings();
+        settings.AutoFeatureWeights = state.AutoFeatureWeights;
+        settings.AutoArchetypeBias = state.AutoArchetypeBias;
+        settings.FollowTargetBias = state.FollowTargetBias;
+        settings.PreferredGapPixels = state.PreferredGapPixels;
+        settings.PreferredMainRatio = state.PreferredMainRatio;
+        settings.AutoCorrectionSamples = state.AutoCorrectionSamples;
+        settings.FollowGestureSamples = state.FollowGestureSamples;
         WriteStoredSettings(settings);
     }
 
@@ -158,6 +195,7 @@ internal sealed class SettingsStore
         public bool Alt { get; set; }
         public bool Shift { get; set; }
         public bool Win { get; set; }
+        public bool? AutoTidyEnabled { get; set; }
 
         public int? AlgorithmMode { get; set; }
         public int? SmartStrength { get; set; }
@@ -165,6 +203,8 @@ internal sealed class SettingsStore
         public int? SmartSizeTendency { get; set; }
         public int? SmartOverlapAvoidance { get; set; }
         public bool? PreferReversibleVerticalFill { get; set; }
+        public bool? RemoveVideoBlackBars { get; set; }
+        public int? VideoBlackBarTendency { get; set; }
 
         public double? PreserveLayoutWeight { get; set; }
         public double? ResizeResistanceWeight { get; set; }
@@ -179,6 +219,16 @@ internal sealed class SettingsStore
         public bool? RescueOffscreenWindows { get; set; }
         public int? Passes { get; set; }
 
+        // Personalized model state. These are geometry-only residual parameters; no window titles,
+        // process names, raw pointer history or screenshots are persisted.
+        public double[]? AutoFeatureWeights { get; set; }
+        public double[]? AutoArchetypeBias { get; set; }
+        public double[]? FollowTargetBias { get; set; }
+        public double? PreferredGapPixels { get; set; }
+        public double? PreferredMainRatio { get; set; }
+        public int? AutoCorrectionSamples { get; set; }
+        public int? FollowGestureSamples { get; set; }
+
         internal static StoredSettings CreateDefault()
         {
             var hotkey = HotkeyBinding.Default;
@@ -189,6 +239,7 @@ internal sealed class SettingsStore
                 Alt = hotkey.Alt,
                 Shift = hotkey.Shift,
                 Win = hotkey.Win,
+                AutoTidyEnabled = false,
             };
         }
     }

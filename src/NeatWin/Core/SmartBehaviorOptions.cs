@@ -7,6 +7,14 @@ public enum SmartOverlapAvoidance
     Strong,
 }
 
+public enum VideoBlackBarTendency
+{
+    Shrink,
+    Expand,
+}
+
 public sealed record SmartBehaviorOptions(
     bool PreferReversibleVerticalFill = true,
-    SmartOverlapAvoidance OverlapAvoidance = SmartOverlapAvoidance.Balanced);
+    SmartOverlapAvoidance OverlapAvoidance = SmartOverlapAvoidance.Balanced,
+    bool RemoveVideoBlackBars = false,
+    VideoBlackBarTendency VideoBlackBarTendency = VideoBlackBarTendency.Shrink);
