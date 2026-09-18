@@ -25,7 +25,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
     private readonly System.Windows.Forms.Timer _attentionTimer;
     private readonly System.Windows.Forms.Timer _dragTimer;
     private readonly nint _eventHook;
-    private readonly nint _mouseHook;
+    private nint _mouseHook;
     private readonly Dictionary<nint, AttentionState> _attention = new();
     private long _suppressUntilTick;
     private bool _enabled;
@@ -62,13 +62,8 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
             NativeMethods.WinEventOutOfContext | NativeMethods.WinEventSkipOwnProcess);
 
         _mouseProc = OnLowLevelMouse;
-        _mouseHook = NativeMethods.SetWindowsHookEx(
-            NativeMethods.WhMouseLl,
-            _mouseProc,
-            nint.Zero,
-            0);
-
-        _attentionTimer.Start();
+        // Follow-hand is initially disabled. Geometry WinEvents remain available for explicit
+        // tidy, but pointer polling and the global mouse hook are installed only when needed.
     }
 
     internal event Action<ManualWindowGesture>? GestureObserved;
@@ -77,18 +72,39 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
     internal bool IsGestureActive => _activeGesture is not null;
 
     internal bool IsAvailable => _eventHook != nint.Zero;
+    internal bool PointerTrackingActive => _attentionTimer.Enabled || _dragTimer.Enabled || _mouseHook != nint.Zero;
 
     internal bool Enabled
     {
         get => _enabled;
         set
         {
+            if (_disposed) return;
             _enabled = value && IsAvailable;
+            SetPointerTracking(_enabled);
             if (!_enabled)
             {
                 _debounceTimer.Stop();
                 _pendingGesture = null;
             }
+        }
+    }
+
+    private void SetPointerTracking(bool enabled)
+    {
+        if (enabled)
+        {
+            if (_mouseHook == nint.Zero)
+                _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WhMouseLl, _mouseProc, nint.Zero, 0);
+            _attentionTimer.Start();
+            if (_activeGesture is not null) _dragTimer.Start();
+        }
+        else
+        {
+            _attentionTimer.Stop(); _dragTimer.Stop();
+            if (_mouseHook != nint.Zero) _ = NativeMethods.UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = nint.Zero;
+            _attention.Clear(); _hasAttentionPoint = false;
         }
     }
 
@@ -171,6 +187,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         if (_mouseHook != nint.Zero)
         {
             _ = NativeMethods.UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = nint.Zero;
         }
 
         _attention.Clear();
@@ -209,7 +226,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
     {
         try
         {
-            if (!_disposed && code >= NativeMethods.HcAction && message == NativeMethods.WmLButtonDown)
+            if (!_disposed && _enabled && code >= NativeMethods.HcAction && message == NativeMethods.WmLButtonDown)
             {
                 var data = Marshal.PtrToStructure<NativeMethods.MsllHookStruct>(dataPointer);
                 var hit = NativeMethods.WindowFromPoint(data.Point);
@@ -239,7 +256,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
                 EndGesture(message.WParam);
                 return;
             case ClickMessage:
-                TouchClick(message.WParam);
+                if (_enabled) TouchClick(message.WParam);
                 return;
         }
 
@@ -268,7 +285,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
             now,
             samples);
         TouchManipulation(hwnd, now, impulse: 0.45);
-        _dragTimer.Start();
+        if (_enabled) _dragTimer.Start();
     }
 
     private void EndGesture(nint hwnd)
@@ -345,7 +362,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     private void OnAttentionTick(object? sender, EventArgs eventArgs)
     {
-        if (_disposed || !NativeMethods.GetCursorPos(out var cursor))
+        if (_disposed || !_enabled || !NativeMethods.GetCursorPos(out var cursor))
         {
             return;
         }
@@ -407,6 +424,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     private void TouchManipulation(nint hwnd, long now, double impulse)
     {
+        if (!_enabled) return;
         var state = GetDecayedState(hwnd, now);
         state.Score = Math.Clamp(state.Score + impulse, 0, 2.0);
         state.LastScoreTick = now;

@@ -31,6 +31,22 @@ public sealed record ViewingCalibration(RectI WorkArea, uint Dpi, double WidthMi
     public double HorizontalAngle(double x, RectI area) =>
         Math.Atan((x - (area.Left + area.Width / 2.0)) / area.Width * WidthMillimeters /
             DistanceMillimeters) * 180 / Math.PI;
+
+    // Angle between two eye-to-content rays on a flat screen with square pixels.
+    // Keeping both axes avoids treating vertically separated content as zero distance.
+    public double AngularSeparation(double firstX, double firstY, double secondX, double secondY)
+    {
+        var mmPerPixel = WidthMillimeters / WorkArea.Width;
+        var cx = WorkArea.Left + WorkArea.Width / 2.0;
+        var cy = WorkArea.Top + WorkArea.Height / 2.0;
+        var ax = (firstX - cx) * mmPerPixel; var ay = (firstY - cy) * mmPerPixel;
+        var bx = (secondX - cx) * mmPerPixel; var by = (secondY - cy) * mmPerPixel;
+        var z = DistanceMillimeters;
+        var crossX = z * (ay - by); var crossY = z * (bx - ax);
+        var crossZ = ax * by - ay * bx;
+        var cross = Math.Sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+        return Math.Atan2(cross, ax * bx + ay * by + z * z) * 180 / Math.PI;
+    }
 }
 
 public enum TaskRelation { Automatic, JointView, Alternating, Integrated }
@@ -40,7 +56,8 @@ public sealed record TaskWindowHint(nint Handle, bool PassiveVisual = false,
 public sealed record TaskLayoutContext(TaskLayoutProfile? Profile = null, TaskDisplay[]? Displays = null,
     ViewingCalibration? Calibration = null, TaskPairHint[]? PairHints = null,
     TaskWindowHint[]? WindowHints = null, ManualWindowGesture? RecentGesture = null,
-    bool VerifiedRepeat = false, string[]? RejectedLayouts = null, VideoBlackBarHint? VideoHint = null)
+    bool VerifiedRepeat = false, string[]? RejectedLayouts = null, VideoBlackBarHint? VideoHint = null,
+    bool PreferReversibleVerticalFill = false)
 {
     public TaskLayoutProfile Preferences => (Profile ?? new()).Normalize();
 }
@@ -50,7 +67,7 @@ public sealed class TaskLayoutSession
 {
     private string? _pending;
     private string? _verified;
-    private string[] _pendingGroups = [];
+    private FeedbackGroup[] _pendingGroups = [];
     private readonly Queue<string> _rejected = new();
     private ManualWindowGesture? _gesture;
     private DateTimeOffset _gestureTime;
@@ -74,7 +91,11 @@ public sealed class TaskLayoutSession
         if (plan.Moves.Count == 0 && plan.Layers.Count == 0) return;
         var placed = Project(before, plan);
         _pending = Fingerprint(placed); _verified = null; _appliedTime = now;
-        _pendingGroups = plan.Groups.Select(g => LayoutKey(placed.Where(w => g.Handles.Contains(w.Handle)))).ToArray();
+        var changed = plan.Moves.Where(m => m.TargetVisualRect != m.Window.VisualRect)
+            .Select(m => m.Window.Handle).Concat(plan.Layers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))).ToHashSet();
+        _pendingGroups = plan.Groups.Where(g => g.Handles.Any(changed.Contains))
+            .Select(g => new FeedbackGroup(LayoutKey(placed.Where(w => g.Handles.Contains(w.Handle))),
+                g.Handles.Where(changed.Contains).ToArray())).ToArray();
     }
 
     public void Verify(IReadOnlyList<WindowSnapshot> actual)
@@ -84,15 +105,20 @@ public sealed class TaskLayoutSession
         _pending = null;
     }
 
-    public void RejectExplicitly()
+    public void RejectExplicitly(IEnumerable<nint>? restoredHandles = null)
     {
-        foreach (var key in _pendingGroups)
+        var restored = restoredHandles?.ToHashSet();
+        foreach (var group in _pendingGroups)
         {
-            _rejected.Enqueue(key);
+            // A skipped/partial undo must not label a complete, untouched group as rejected.
+            if (restored is not null && !group.ChangedHandles.All(restored.Contains)) continue;
+            if (!_rejected.Contains(group.Layout)) _rejected.Enqueue(group.Layout);
             while (_rejected.Count > 32) _rejected.Dequeue();
         }
         _pendingGroups = []; _pending = null; _verified = null;
     }
+
+    private sealed record FeedbackGroup(string Layout, nint[] ChangedHandles);
 
     public void Invalidate() { _pending = null; _verified = null; }
 

@@ -71,15 +71,23 @@ internal static partial class IntentLayoutPlanner
         return (left, right);
     }
 
-    private static bool TaskSafe(VisibleWindow[] windows, RectI[] original, Candidate candidate,
-        RectI area, TidyOptions options, TaskLayoutContext context, WindowSnapshot[]? obstacles = null)
+    private static OcclusionMetrics.Exposure[] MeasureBeforeExposure(VisibleWindow[] windows,
+        RectI[] original, RectI area, WindowSnapshot[]? obstacles)
     {
-        var frontBefore = new List<RectI>();
-        var previous = original.Select((r, i) =>
+        var front = new List<RectI>();
+        return original.Select((r, i) =>
         {
-            var result = ScreenExposure(r, frontBefore.Concat((obstacles ?? []).Where(w => w.ZOrder < windows[i].Window.ZOrder).Select(w => w.VisualRect)), area, windows[i].Window.Dpi);
-            frontBefore.Add(r); return result;
+            var result = ScreenExposure(r, front.Concat((obstacles ?? []).Where(w => w.ZOrder < windows[i].Window.ZOrder)
+                .Select(w => w.VisualRect)), area, windows[i].Window.Dpi);
+            front.Add(r); return result;
         }).ToArray();
+    }
+
+    private static bool TaskSafe(VisibleWindow[] windows, RectI[] original, Candidate candidate,
+        RectI area, TidyOptions options, TaskLayoutContext context, WindowSnapshot[]? obstacles = null,
+        OcclusionMetrics.Exposure[]? beforeExposure = null)
+    {
+        var previous = beforeExposure ?? MeasureBeforeExposure(windows, original, area, obstacles);
         var front = new List<RectI>();
         foreach (var i in candidate.Order)
         {
@@ -156,6 +164,7 @@ internal static partial class IntentLayoutPlanner
             if (context.RecentGesture is { } gesture && gesture.WindowHandle == w.Handle &&
                 gesture.WorkArea == area && gesture.EndRect == a && gesture.Kind != ManualGestureKind.Move)
                 reflow += .45 * (Math.Abs(Math.Log(b.Width / (double)a.Width)) + Math.Abs(Math.Log(b.Height / (double)a.Height)));
+            alignment += VerticalFillPreferenceCost(w, a, b, context) / Math.Max(1, windows.Length);
             front.Add(b);
         }
         var n = Math.Max(1, windows.Length);
@@ -176,7 +185,7 @@ internal static partial class IntentLayoutPlanner
             // Proximity compatibility is task-dependent, not 'closer is always better'.
             var separation = newDistance / Math.Max(1, Math.Min(area.Width, area.Height));
             if (context.Calibration is { } calibration && calibration.Matches(area, windows[r.First].Window.Dpi))
-                separation = Math.Abs(calibration.HorizontalAngle(CenterX(a), area) - calibration.HorizontalAngle(CenterX(b), area)) / 45.0;
+                separation = calibration.AngularSeparation(CenterX(a), CenterY(a), CenterX(b), CenterY(b)) / 45.0;
             switching += (.04 * r.Joint + .28 * r.Integrated) * separation;
             continuity += r.Parked * .85 * Math.Max(0, (newDistance - oldDistance) / Math.Max(1, Math.Min(oa.Width, ob.Width)));
             var horizontal = !r.SameColumn && a.VerticalOverlapRatio(b) >= .4;
@@ -203,6 +212,20 @@ internal static partial class IntentLayoutPlanner
         if (context.VerifiedRepeat) return refined.Count == 0;
         var known = planned.Groups.SelectMany(g => g.Handles).ToHashSet();
         if (refined.Any(m => !known.Contains(m.Window.Handle))) return false;
+        var ranks = desktop.ToDictionary(w => w.Handle, w => w.ZOrder);
+        foreach (var layer in planned.Layers)
+        {
+            var slots = layer.FrontToBack.Select(w => ranks[w.Handle]).Order().ToArray();
+            for (var i = 0; i < slots.Length; i++) ranks[layer.FrontToBack[i].Handle] = slots[i];
+        }
+        WindowSnapshot[] Project(IReadOnlyList<TidyMove> moves)
+        {
+            var targets = moves.ToDictionary(m => m.Window.Handle, m => m.TargetVisualRect);
+            return desktop.Select(w => w with { VisualRect = targets.GetValueOrDefault(w.Handle, w.VisualRect),
+                ZOrder = ranks[w.Handle] }).ToArray();
+        }
+        var plannedDesktop = Project(planned.Moves);
+        var refinedDesktop = Project(refined);
         foreach (var trace in planned.Groups)
         {
             var group = visible.Where(v => trace.Handles.Contains(v.Window.Handle)).OrderBy(v => v.Window.ZOrder).ToArray();
@@ -215,15 +238,20 @@ internal static partial class IntentLayoutPlanner
                 layer.FrontToBack.Select(w => Array.FindIndex(group, v => v.Window.Handle == w.Handle)).ToArray();
             if (order.Length != group.Length || order.Any(i => i < 0)) return false;
             var area = group[0].Window.WorkArea;
-            var obstacles = desktop.Where(w => !trace.Handles.Contains(w.Handle) && w.MonitorHandle == group[0].Window.MonitorHandle).ToArray();
+            var beforeObstacles = plannedDesktop.Where(w => !trace.Handles.Contains(w.Handle) &&
+                w.MonitorHandle == group[0].Window.MonitorHandle).ToArray();
+            var afterObstacles = refinedDesktop.Where(w => !trace.Handles.Contains(w.Handle) &&
+                w.MonitorHandle == group[0].Window.MonitorHandle).ToArray();
             var c = new Candidate("refined", after, order);
-            if (!TaskSafe(group, original, c, area, options, context, obstacles)) return false;
+            if (!TaskSafe(group, original, c, area, options, context, afterObstacles)) return false;
             for (var i = 0; i < group.Length; i++)
-                if (obstacles.Any(w => after[i].Intersect(w.VisualRect).Area > before[i].Intersect(w.VisualRect).Area)) return false;
+                for (var j = 0; j < afterObstacles.Length; j++)
+                    if (after[i].Intersect(afterObstacles[j].VisualRect).Area >
+                        before[i].Intersect(beforeObstacles[j].VisualRect).Area) return false;
             var task = InferTask(group, original, context);
             var hint = new IntentHint((int)Math.Round(8 * group[0].Window.Dpi / 96.0), 0, 0);
-            if (TaskCost(group, original, c, task, area, context, hint, obstacles).Total >
-                TaskCost(group, original, new("planned", before, order), task, area, context, hint, obstacles).Total + .01) return false;
+            if (TaskCost(group, original, c, task, area, context, hint, afterObstacles).Total >
+                TaskCost(group, original, new("planned", before, order), task, area, context, hint, beforeObstacles).Total + .01) return false;
         }
         return true;
     }

@@ -56,23 +56,26 @@ internal static partial class IntentLayoutPlanner
                     AddOrders(candidates, "restack", original, group);
                     AddTaskCandidates(candidates, group, original, area, task, taskContext);
                 }
+                AddVerticalFillCandidates(candidates, group, original, taskContext);
                 var stackSignal = StackSignal(group, original);
                 TaskCostBreakdown Breakdown(Candidate c) => TaskCost(group, original, c, task, area, taskContext, hint, obstacles);
-                double Cost(Candidate c) => Breakdown(c).Total;
                 candidates = candidates.DistinctBy(c => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order)).ToList();
-                var best = candidates[0]; var baseline = Cost(best); var bestScore = baseline;
-                var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, Breakdown(best)) };
+                var best = candidates[0]; var baselineBreakdown = Breakdown(best);
+                var baseline = baselineBreakdown.Total; var bestScore = baseline;
+                var beforeExposure = MeasureBeforeExposure(group, original, area, obstacles);
+                var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, baselineBreakdown) };
                 foreach (var candidate in candidates.Skip(1))
                 {
                     var rejection = !candidate.Order.SequenceEqual(order) &&
                         !WindowLayerSafety.CanReorder(group.Select(v => v.Window).ToArray(), desktop ?? all.Select(v => v.Window).ToArray())
-                        ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles) ? "geometry-budget" :
+                        ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles, beforeExposure) ? "geometry-budget" :
                         HitsOutsideGroup(settled, group, original, candidate.Rects) ? "other-group" :
                         blockers.Any(w => candidate.Rects.Select((r, i) => r.Intersect(w.VisualRect).Area > original[i].Intersect(w.VisualRect).Area).Any(b => b)) ? "fixed-occluder" :
                         null;
                     if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection)); continue; }
-                    var score = Cost(candidate);
-                    audits.Add(new(candidate.Kind, score, null, Breakdown(candidate)));
+                    var breakdown = Breakdown(candidate);
+                    var score = breakdown.Total;
+                    audits.Add(new(candidate.Kind, score, null, breakdown));
                     var threshold = options.SmartStrength switch
                     {
                         SmartTidyStrength.Gentle => 0.18,
