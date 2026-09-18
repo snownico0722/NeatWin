@@ -211,6 +211,7 @@ internal sealed class ReversibleVerticalFillManager : IDisposable
 
         var restoredVisual = PlaceRestoreRectUnderCursor(entry, currentVisual, cursor);
         var outer = ToOuterRect(restoredVisual, entry.FrameInsets);
+        AutomationGuard.Mark(hwnd);
         var success = NativeMethods.SetWindowPos(
             hwnd,
             nint.Zero,

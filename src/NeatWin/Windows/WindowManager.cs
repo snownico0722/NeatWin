@@ -5,7 +5,7 @@ using NeatWin.Core;
 
 namespace NeatWin.Windows;
 
-public sealed class WindowManager
+public sealed partial class WindowManager
 {
     private const int SwShowMaximized = 3;
     private static readonly HashSet<string> SystemClasses = new(StringComparer.Ordinal)
@@ -37,7 +37,7 @@ public sealed class WindowManager
             }
 
             NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
-            if (processId == ownProcessId)
+            if (processId == ownProcessId || AutomationGuard.IsUtility(hwnd))
             {
                 return true;
             }
@@ -103,7 +103,10 @@ public sealed class WindowManager
                 isResizable,
                 hwnd == foreground,
                 isManageable,
-                zOrder++));
+                zOrder++,
+                Math.Max(96u, NativeMethods.GetDpiForWindow(hwnd)),
+                processId,
+                (exStyle & 8) != 0));
 
             return true;
         }, nint.Zero);
@@ -122,6 +125,8 @@ public sealed class WindowManager
         {
             return;
         }
+
+        foreach (var move in plan) AutomationGuard.Mark(move.Window.Handle);
 
         var flags =
             NativeMethods.SwpNoZOrder |
