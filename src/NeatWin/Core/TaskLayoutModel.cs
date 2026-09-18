@@ -122,11 +122,16 @@ internal static partial class IntentLayoutPlanner
             var exposure = ScreenExposure(b, front.Concat((obstacles ?? []).Where(o => o.ZOrder < windows[Array.IndexOf(candidate.Order, i)].Window.ZOrder).Select(o => o.VisualRect)), area, w.Dpi);
             var windowHint = context.WindowHints?.FirstOrDefault(h => h.Handle == w.Handle);
             var geometricSmall = a.Area < area.Area * .15;
-            // Capacity is finite and task-conditioned, not an instruction to preserve a rectangle.
-            var needWidth = geometricSmall ? a.Width : Math.Min(profile.ComfortableWidthDip * scale,
-                Math.Max(a.Width * .80, profile.ComfortableWidthDip * scale * .75));
-            var needHeight = geometricSmall ? a.Height : Math.Min(profile.ComfortableHeightDip * scale,
-                Math.Max(a.Height * .80, profile.ComfortableHeightDip * scale * .75));
+            // Without content evidence, a generic minimum must not invent a need to enlarge
+            // already unobscured windows. This is saturation, not a prohibition on resizing:
+            // shrinkage can buy joint visibility; passive/content hints can justify growth.
+            var needWidth = geometricSmall ? a.Width : Math.Min(a.Width, profile.ComfortableWidthDip * scale);
+            var needHeight = geometricSmall ? a.Height : Math.Min(a.Height, profile.ComfortableHeightDip * scale);
+            if (windowHint?.PassiveVisual == true)
+            {
+                needWidth = Math.Min(profile.ComfortableWidthDip * scale, Math.Max(a.Width, profile.ComfortableWidthDip * scale * .75));
+                needHeight = Math.Min(profile.ComfortableHeightDip * scale, Math.Max(a.Height, profile.ComfortableHeightDip * scale * .75));
+            }
             if (windowHint?.UsefulWidthDip is double width && double.IsFinite(width) && width > 0) needWidth = Math.Clamp(width, 160, 4000) * scale;
             if (windowHint?.UsefulHeightDip is double height && double.IsFinite(height) && height > 0) needHeight = Math.Clamp(height, 120, 3000) * scale;
             var capacity = Math.Pow(Math.Min(1, b.Width / Math.Max(1, needWidth)), .65) *
