@@ -94,7 +94,7 @@ internal sealed class MainWindow : Form
         autoHost.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "自动",
+            Text = "随手辅助",
             ForeColor = UiTheme.Text,
             Font = UiTheme.Semibold(9.5F),
             Margin = new Padding(0, 2, 9, 0),
@@ -179,6 +179,14 @@ internal sealed class MainWindow : Form
         UiTheme.StyleSecondary(exitButton);
         exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
         bottom.Controls.Add(exitButton);
+        var recorderButton = new Button { Text = "习惯记录器", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+        UiTheme.StyleSecondary(recorderButton);
+        recorderButton.Click += (_, _) => RecorderRequested?.Invoke(this, EventArgs.Empty);
+        bottom.Controls.Add(recorderButton);
+        var undoButton = new Button { Text = "撤销上次整理", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+        UiTheme.StyleSecondary(undoButton);
+        undoButton.Click += (_, _) => UndoRequested?.Invoke(this, EventArgs.Empty);
+        bottom.Controls.Add(undoButton);
         root.Controls.Add(bottom, 0, 5);
 
         _algorithmModeSelector.ValueChanged += OnAlgorithmModeChanged;
@@ -190,6 +198,8 @@ internal sealed class MainWindow : Form
     }
 
     internal event EventHandler? TidyRequested;
+    internal event EventHandler? UndoRequested;
+    internal event EventHandler? RecorderRequested;
     internal event EventHandler<HotkeyChangeEventArgs>? HotkeyChangeRequested;
     internal event EventHandler<TidyOptionsChangeEventArgs>? TidyOptionsChangeRequested;
     internal event EventHandler<AutoTidyChangeEventArgs>? AutoTidyChangeRequested;
