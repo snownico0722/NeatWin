@@ -8,7 +8,7 @@ public sealed class VisibilityAnalyzer
 {
     public IReadOnlyList<VisibleWindow> SelectVisibleWorkingSet(
         IReadOnlyList<WindowSnapshot> windows,
-        VisibilityOptions? options = null)
+        VisibilityOptions? options = null, bool includeStackAccess = false)
     {
         options ??= new VisibilityOptions();
         var result = new List<VisibleWindow>();
@@ -43,11 +43,17 @@ public sealed class VisibilityAnalyzer
                 continue;
             }
 
+            var scale = Math.Clamp(window.Dpi / 96.0, 0.5, 4);
+            var topBand = new RectI(window.VisualRect.X, window.VisualRect.Y, window.VisualRect.Width,
+                Math.Min(window.VisualRect.Height, (int)Math.Round(32 * scale)));
+            var stackAccess = includeStackAccess && fragments.Select(f => f.Intersect(topBand)).Any(f =>
+                f.Width >= Math.Min(window.VisualRect.Width * 0.5, 240 * scale) && f.Height >= 18 * scale);
+
             var isVisuallyPresent =
                 visibleRatio >= options.MinimumVisibleRatio &&
                 largestFragment >= options.MinimumLargestVisibleFragmentArea;
 
-            if (window.IsForeground || isVisuallyPresent)
+            if (window.IsForeground || isVisuallyPresent || stackAccess)
             {
                 result.Add(new VisibleWindow(window, visibleArea, largestFragment, visibleRatio));
             }
