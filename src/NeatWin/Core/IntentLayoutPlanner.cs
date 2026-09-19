@@ -63,7 +63,7 @@ internal static partial class IntentLayoutPlanner
                 TaskCostBreakdown Breakdown(Candidate c) => TaskCost(group, original, c, task, area, taskContext, hint, obstacles);
                 candidates = candidates.DistinctBy(c => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order)).ToList();
                 var best = candidates[0]; var baselineBreakdown = Breakdown(best);
-                var baseline = baselineBreakdown.Total; var bestScore = baseline;
+                var baseline = TaskScore(baselineBreakdown, options.SmartStrength, task); var bestScore = baseline;
                 var beforeExposure = MeasureBeforeExposure(group, original, area, obstacles);
                 var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, baselineBreakdown) };
                 var seen = candidates.Select(CandidateKey).ToHashSet();
@@ -72,7 +72,7 @@ internal static partial class IntentLayoutPlanner
                 // safety floors and movement origin. Never learn or re-infer from our own output.
                 // This is bounded candidate lookahead, not repeated native window application.
                 if (group.Length is >= 2 and <= 8)
-                for (var generation = 1; generation <= 2 && best.Kind != "keep"; generation++)
+                for (var generation = 1; generation <= 3 && best.Kind != "keep"; generation++)
                 {
                     var seed = best;
                     var completion = new List<Candidate>();
@@ -93,6 +93,8 @@ internal static partial class IntentLayoutPlanner
                 void Evaluate(Candidate candidate, int generation)
                 {
                     var rejection = !candidate.Order.SequenceEqual(order) &&
+                        !LayerOrderSafe(group, candidate, order)
+                        ? "layer-preserve-foreground-or-occluded" : !candidate.Order.SequenceEqual(order) &&
                         !WindowLayerSafety.CanReorder(group.Select(v => v.Window).ToArray(), desktop ?? all.Select(v => v.Window).ToArray())
                         ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles, beforeExposure) ? "geometry-budget" :
                         HitsOutsideGroup(settled, group, original, candidate.Rects) ? "other-group" :
@@ -100,14 +102,9 @@ internal static partial class IntentLayoutPlanner
                         null;
                     if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection, Generation: generation)); return; }
                     var breakdown = Breakdown(candidate);
-                    var score = breakdown.Total;
+                    var score = TaskScore(breakdown, options.SmartStrength, task);
                     audits.Add(new(candidate.Kind, score, null, breakdown, generation));
-                    var threshold = options.SmartStrength switch
-                    {
-                        SmartTidyStrength.Gentle => 0.18,
-                        SmartTidyStrength.Assertive => 0.025,
-                        _ => 0.065,
-                    };
+                    var threshold = SelectionThreshold(options.SmartStrength, task);
                     var needsRescue = options.RescueOffscreenWindows && original.Any(r =>
                         r.Intersect(area).Area < r.Area * .90 || r.Top < area.Top || r.Bottom > area.Bottom);
                     if ((score < bestScore && score < baseline - threshold) || (best.Kind == "keep" && needsRescue && candidate.Kind == "rescue"))
@@ -135,6 +132,74 @@ internal static partial class IntentLayoutPlanner
             }
         }
         return new(moves, layers, traces);
+    }
+
+    internal static double TaskScore(TaskCostBreakdown breakdown, SmartTidyStrength strength,
+        TaskEvidence[]? relations = null)
+    {
+        // Stronger Smart means lower resistance to useful geometry reflow, not weaker visibility,
+        // access, edge protection or negative feedback. A confidently staged/parked task remains
+        // deliberately conservative: "I left this nearby" is different from "finish arranging it".
+        var parked = ConfidentlyParked(relations);
+        var adaptationScale = parked ? strength switch
+        {
+            SmartTidyStrength.Gentle => 1.15,
+            SmartTidyStrength.Assertive => 0.75,
+            _ => 1.00,
+        } : strength switch
+        {
+            SmartTidyStrength.Gentle => 1.05,
+            SmartTidyStrength.Assertive => 0.40,
+            _ => 0.68,
+        };
+        return breakdown.InformationLoss + breakdown.Switching + breakdown.PeripheralLoss +
+            breakdown.Alignment + breakdown.Uncertainty + breakdown.Feedback +
+            adaptationScale * (breakdown.Continuity + breakdown.Reflow);
+    }
+
+    internal static double SelectionThreshold(SmartTidyStrength strength, TaskEvidence[]? relations = null)
+    {
+        if (ConfidentlyParked(relations))
+            return strength switch
+            {
+                SmartTidyStrength.Gentle => 0.18,
+                SmartTidyStrength.Assertive => 0.025,
+                _ => 0.065,
+            };
+        return strength switch
+        {
+            SmartTidyStrength.Gentle => 0.14,
+            SmartTidyStrength.Assertive => 0.005,
+            _ => 0.03,
+        };
+    }
+
+    private static bool ConfidentlyParked(TaskEvidence[]? relations)
+    {
+        if (relations is null || relations.Length == 0) return false;
+        var parked = relations.Max(r => r.Parked * (1 - r.Uncertainty));
+        var joint = relations.Max(r => r.Joint * (1 - r.Uncertainty));
+        return parked >= .65 && parked > joint + .15;
+    }
+
+    private static bool LayerOrderSafe(VisibleWindow[] group, Candidate candidate, int[] natural)
+    {
+        if (candidate.Order.SequenceEqual(natural)) return true;
+        var positions = new int[group.Length];
+        for (var rank = 0; rank < candidate.Order.Length; rank++) positions[candidate.Order[rank]] = rank;
+
+        // Geometry may be assertive, but Smart must not "surface" a background card by stealing
+        // the user's current front relation. Foreground is a strong explicit interaction signal.
+        var foreground = Array.FindIndex(group, item => item.Window.IsForeground);
+        if (foreground >= 0 && positions[foreground] != 0) return false;
+
+        // A materially occluded window is evidence of parking/background use, not evidence that it
+        // should be promoted. It may move/resize to become more useful, but its Z position remains
+        // stable unless it was already at that rank. This directly separates geometry strength
+        // from layer aggressiveness.
+        for (var i = 0; i < group.Length; i++)
+            if (group[i].VisibleRatio < .65 && positions[i] < i) return false;
+        return true;
     }
 
     private static string CandidateKey(Candidate c) => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order);
