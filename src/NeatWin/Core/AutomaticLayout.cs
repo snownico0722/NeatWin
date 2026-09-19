@@ -13,10 +13,14 @@ public static class AutomaticLayoutPolicy
         // Version 5 used persisted value 4 for automatic full tiling. Full tiling is now a
         // separate explicit action, so migrate that value to automatic full Smart rather than
         // continuing an unexpectedly destructive automatic tiler.
-        if (value == 4) return AutomaticLayoutMode.AutoFullAssist;
-        return value is int raw && Enum.IsDefined(typeof(AutomaticLayoutMode), raw)
-            ? (AutomaticLayoutMode)raw
-            : legacyEnabled == true ? AutomaticLayoutMode.LightAssist : AutomaticLayoutMode.Off;
+        if (value is int raw)
+        {
+            if (raw == 4) return AutomaticLayoutMode.AutoFullAssist;
+            return Enum.IsDefined(typeof(AutomaticLayoutMode), raw)
+                ? (AutomaticLayoutMode)raw
+                : AutomaticLayoutMode.Off;
+        }
+        return legacyEnabled == true ? AutomaticLayoutMode.LightAssist : AutomaticLayoutMode.Off;
     }
     public static bool WatchesWorkspace(AutomaticLayoutMode mode) => mode == AutomaticLayoutMode.AutoFullAssist;
     public static bool UsesFullPlanner(AutomaticLayoutMode mode) => mode is AutomaticLayoutMode.FullAssist or AutomaticLayoutMode.AutoFullAssist;
