@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../NeatWin/Core/Geometry.cs" Link="Shared/Geometry.cs" />
@@ -20,5 +21,6 @@
     <Compile Include="../NeatWin/Core/OcclusionMetrics.cs" Link="Shared/OcclusionMetrics.cs" />
     <Compile Include="../NeatWin/Core/ObservationContext.cs" Link="Shared/ObservationContext.cs" />
     <Compile Include="../NeatWin/Core/TaskLayoutEvidence.cs" Link="Shared/TaskLayoutEvidence.cs" />
+    <Compile Include="../NeatWin/Recording/RecorderSession.cs" Link="Shared/RecorderSession.cs" />
   </ItemGroup>
 </Project>

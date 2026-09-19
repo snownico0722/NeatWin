@@ -25,7 +25,7 @@ internal static partial class IntentLayoutPlanner
                 // Include smaller readable arrangements and useful enlargement, not fill at any cost.
                 var total = Math.Min(area.Width * 1.12, DemandWidth(windows[left].Window, a) + DemandWidth(windows[right].Window, b));
                 foreach (var ratio in new[] { a.Width / (double)(a.Width + b.Width), .50, .58, .42 }.Distinct())
-                foreach (var occupancy in new[] { .90, 1.0, 1.10 })
+                foreach (var occupancy in new[] { .82, .90, 1.0, 1.10, 1.18 })
                 {
                     var targetTotal = Math.Min(area.Width * 1.18, total * occupancy);
                     var widthA = (int)Math.Round(targetTotal * ratio);

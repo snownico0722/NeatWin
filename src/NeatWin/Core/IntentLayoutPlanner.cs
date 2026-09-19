@@ -60,7 +60,8 @@ internal static partial class IntentLayoutPlanner
                 }
                 AddVerticalFillCandidates(candidates, group, original, taskContext);
                 var stackSignal = StackSignal(group, original);
-                TaskCostBreakdown Breakdown(Candidate c) => TaskCost(group, original, c, task, area, taskContext, hint, obstacles);
+                TaskCostBreakdown Breakdown(Candidate c) => EffectiveBreakdown(
+                    TaskCost(group, original, c, task, area, taskContext, hint, obstacles), options.SmartStrength, task);
                 candidates = candidates.DistinctBy(c => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order)).ToList();
                 var best = candidates[0]; var baselineBreakdown = Breakdown(best);
                 var baseline = baselineBreakdown.Total; var bestScore = baseline;
@@ -93,6 +94,8 @@ internal static partial class IntentLayoutPlanner
                 void Evaluate(Candidate candidate, int generation)
                 {
                     var rejection = !candidate.Order.SequenceEqual(order) &&
+                        !LayerOrderSafe(group, candidate, order)
+                        ? "layer-preserve-foreground-or-occluded" : !candidate.Order.SequenceEqual(order) &&
                         !WindowLayerSafety.CanReorder(group.Select(v => v.Window).ToArray(), desktop ?? all.Select(v => v.Window).ToArray())
                         ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles, beforeExposure) ? "geometry-budget" :
                         HitsOutsideGroup(settled, group, original, candidate.Rects) ? "other-group" :
@@ -102,12 +105,7 @@ internal static partial class IntentLayoutPlanner
                     var breakdown = Breakdown(candidate);
                     var score = breakdown.Total;
                     audits.Add(new(candidate.Kind, score, null, breakdown, generation));
-                    var threshold = options.SmartStrength switch
-                    {
-                        SmartTidyStrength.Gentle => 0.18,
-                        SmartTidyStrength.Assertive => 0.025,
-                        _ => 0.065,
-                    };
+                    var threshold = SelectionThreshold(options.SmartStrength, task);
                     var needsRescue = options.RescueOffscreenWindows && original.Any(r =>
                         r.Intersect(area).Area < r.Area * .90 || r.Top < area.Top || r.Bottom > area.Bottom);
                     if ((score < bestScore && score < baseline - threshold) || (best.Kind == "keep" && needsRescue && candidate.Kind == "rescue"))
@@ -135,6 +133,81 @@ internal static partial class IntentLayoutPlanner
             }
         }
         return new(moves, layers, traces);
+    }
+
+    internal static TaskCostBreakdown EffectiveBreakdown(TaskCostBreakdown breakdown, SmartTidyStrength strength,
+        TaskEvidence[]? relations = null)
+    {
+        // Stronger Smart means lower resistance to useful geometry reflow, not weaker visibility,
+        // access, edge protection or negative feedback. A confidently staged/parked task remains
+        // deliberately conservative: "I left this nearby" is different from "finish arranging it".
+        var parked = ConfidentlyParked(relations);
+        var adaptationScale = parked ? strength switch
+        {
+            SmartTidyStrength.Gentle => 1.15,
+            SmartTidyStrength.Assertive => 0.75,
+            _ => 1.00,
+        } : strength switch
+        {
+            SmartTidyStrength.Gentle => 1.05,
+            SmartTidyStrength.Assertive => 0.40,
+            _ => 0.68,
+        };
+        return breakdown with
+        {
+            Continuity = breakdown.Continuity * adaptationScale,
+            Reflow = breakdown.Reflow * adaptationScale,
+        };
+    }
+
+    internal static double TaskScore(TaskCostBreakdown breakdown, SmartTidyStrength strength,
+        TaskEvidence[]? relations = null) => EffectiveBreakdown(breakdown, strength, relations).Total;
+
+    internal static double SelectionThreshold(SmartTidyStrength strength, TaskEvidence[]? relations = null)
+    {
+        if (ConfidentlyParked(relations))
+            return strength switch
+            {
+                SmartTidyStrength.Gentle => 0.18,
+                SmartTidyStrength.Assertive => 0.025,
+                _ => 0.065,
+            };
+        return strength switch
+        {
+            SmartTidyStrength.Gentle => 0.14,
+            SmartTidyStrength.Assertive => 0.005,
+            _ => 0.03,
+        };
+    }
+
+    private static bool ConfidentlyParked(TaskEvidence[]? relations)
+    {
+        if (relations is null || relations.Length == 0) return false;
+        var parked = relations.Max(r => r.Parked * (1 - r.Uncertainty));
+        var joint = relations.Max(r => r.Joint * (1 - r.Uncertainty));
+        return parked >= .65 && parked > joint + .15;
+    }
+
+    private static bool LayerOrderSafe(VisibleWindow[] group, Candidate candidate, int[] natural)
+    {
+        if (candidate.Order.SequenceEqual(natural)) return true;
+        var positions = new int[group.Length];
+        for (var rank = 0; rank < candidate.Order.Length; rank++) positions[candidate.Order[rank]] = rank;
+
+        // Geometry may be assertive, but Smart must not "surface" a background card by stealing
+        // the user's current front relation. Foreground is a strong explicit interaction signal.
+        var foreground = Array.FindIndex(group, item => item.Window.IsForeground);
+        if (foreground >= 0 && positions[foreground] != 0) return false;
+
+        // Clicking our own UI leaves no external IsForeground flag. Preserve existing
+        // occlusion relationships anyway; a visible-area gain is not permission to surface a
+        // parked window. Use geometry, not potentially stale/caller-supplied visible ratios.
+        for (var back = 1; back < group.Length; back++)
+        for (var front = 0; front < back; front++)
+            if (positions[back] < positions[front] &&
+                group[front].Window.VisualRect.Intersect(group[back].Window.VisualRect).Area > 0)
+                return false;
+        return true;
     }
 
     private static string CandidateKey(Candidate c) => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order);

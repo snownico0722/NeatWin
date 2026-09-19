@@ -269,8 +269,8 @@ internal static partial class IntentLayoutPlanner
                         before[i].Intersect(beforeObstacles[j].VisualRect).Area) return false;
             var task = InferTask(group, original, context);
             var hint = new IntentHint((int)Math.Round(8 * group[0].Window.Dpi / 96.0), 0, 0);
-            if (TaskCost(group, original, c, task, area, context, hint, afterObstacles).Total >
-                TaskCost(group, original, new("planned", before, order), task, area, context, hint, beforeObstacles).Total + .01) return false;
+            if (TaskScore(TaskCost(group, original, c, task, area, context, hint, afterObstacles), options.SmartStrength, task) >
+                TaskScore(TaskCost(group, original, new("planned", before, order), task, area, context, hint, beforeObstacles), options.SmartStrength, task) + .01) return false;
         }
         return true;
     }
