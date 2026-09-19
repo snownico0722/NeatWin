@@ -310,11 +310,11 @@ internal sealed class MainWindow : Form
     private Control BuildRecorderPage()
     {
         var page = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.Page, Padding = new Padding(0, 8, 0, 0), AutoScroll = true };
-        var card = new ModernCard { Dock = DockStyle.Top, Height = 264 };
+        var card = new ModernCard { Dock = DockStyle.Top, AutoSize = false, Height = 264 };
         page.Controls.Add(card);
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = UiTheme.Surface, Padding = new Padding(18),
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = UiTheme.Surface, Padding = Padding.Empty,
         };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
