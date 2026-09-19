@@ -33,6 +33,7 @@ internal static class Program
                 // Console-subsystem helper processes can create WinForms later; readiness is
                 // established by the actual captured windows below, not WaitForInputIdle.
             }
+            VerifyElevatedTargets(children);
             var manager = new WindowManager();
             var ids = children.Select(p => (uint)p.Id).ToHashSet();
             var watch = Stopwatch.StartNew();
@@ -75,6 +76,7 @@ internal static class Program
             Require(SetWindowPos(first.Handle, (nint)(-2), 0, 0, 0, 0, 0x213), "Synthetic topmost cleanup failed.");
             VerifyAutomaticModes(manager, ids);
             VerifyModeSelector();
+            VerifyIntegratedRecording(manager, manager.Capture().First(w => w.Handle == windows[0].Handle));
             if (args.Length == 1)
                 VerifyRecorder(args[0], manager.Capture().First(w => w.Handle == windows[0].Handle), children);
             return 0;
@@ -141,26 +143,96 @@ internal static class Program
     {
         using var form = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
         form.Show(); Pump(100);
-        var selector = Descendants(form).OfType<ComboBox>().Single(c => c.AccessibleName == "自动整理档位");
-        Require(selector.Items.Count == 4, "Mode selector does not expose exactly four choices.");
+        Require(!Descendants(form).OfType<ComboBox>().Any(c => c.AccessibleName == "自动整理档位"), "Automation is still a dropdown.");
+        var selector = Descendants(form).OfType<SegmentedSelector<AutomaticLayoutMode>>().Single();
+        var choices = Descendants(selector).OfType<Button>().ToArray();
+        Require(choices.Length == 4, "Mode selector does not expose exactly four choices.");
         var changes = 0;
         form.AutoTidyChangeRequested += (_, _) => changes++;
-        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>()) selector.SelectedIndex = (int)mode;
+        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>())
+            choices.Single(b => b.Text == AutomaticLayoutPolicy.Name(mode)).PerformClick();
         Require(changes == 3, "Mode selection did not produce exactly the expected changes.");
-        var tiling = Descendants(form).OfType<Button>().Single(b => b.Text == "完整平铺");
         var settingsTab = Descendants(form).OfType<Button>().Single(b => b.Text == "整理设置");
-        Require(tiling.Visible && tiling.PointToScreen(Point.Empty).Y < settingsTab.PointToScreen(Point.Empty).Y, "完整平铺没有作为主页面上方的独立操作。" );
+        foreach (var button in choices)
+            Require(button.Visible && button.PointToScreen(Point.Empty).Y < settingsTab.PointToScreen(Point.Empty).Y &&
+                button.Width >= TextRenderer.MeasureText(button.Text, button.Font).Width,
+                "Four choices must be visible, readable and above the tabs.");
+        Require(!Descendants(form).OfType<Button>().Any(b => b.Text == "完整平铺"), "Unexpected fifth tiling action.");
         var recorderTab = Descendants(form).OfType<Button>().Single(b => b.Text == "记录器");
         recorderTab.PerformClick(); Pump(80);
         form.SetRecorderStatus(new RecorderStatus(false, true, 7, 11, 1, null));
-        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "暂停记录"), "内置记录器页缺少暂停控制。" );
-        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "导出记录"), "内置记录器页缺少导出控制。" );
+        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "暂停记录"), "Recorder pause is missing.");
+        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "导出记录"), "Recorder export is missing.");
         using var image = new Bitmap(form.Width, form.Height);
         form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size));
         image.Save("automation-mode-ui.png", System.Drawing.Imaging.ImageFormat.Png);
         form.AllowCloseAndClose();
-        Console.WriteLine("PASS: actual WinForms UI exposes four automation modes, a top-level tiling action and an integrated recorder page; screenshot retained.");
+        Console.WriteLine("PASS: four directly clickable modes across the top; no tiling action; integrated recorder tab; screenshot retained.");
     }
+
+    private static void VerifyIntegratedRecording(WindowManager manager, WindowSnapshot targetWindow)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "NeatWin-integrated-smoke-" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var store = new IntentReferenceStore(dir);
+            using var recorder = new RecorderSession(store);
+            Require(recorder.Status.IsAvailable, "Integrated recorder hooks unavailable.");
+            using var journal = new LayoutRunJournal(manager, store, recorder);
+            var completions = new List<LayoutRunObservation>();
+            journal.Completed += completions.Add;
+            var before = manager.Capture();
+            var w = before.Single(w => w.Handle == targetWindow.Handle);
+            var plan = new IntentLayoutPlan([new(w, w.VisualRect with { X = w.VisualRect.X + 9 })], [], []);
+            manager.ApplyLayout(plan);
+            journal.Record(before, plan, "integrated-test", []);
+            Until(() => completions.Count == 1, 4000, "Integrated journal did not verify placement.");
+            Pump(350);
+            var records = Directory.EnumerateFiles(dir, "plans-*.jsonl").SelectMany(File.ReadLines)
+                .Select(line => JsonSerializer.Deserialize<LayoutRunObservation>(line)!).ToArray();
+            Require(records.Length == 2 && records.All(r => r.Session == recorder.SessionId), "Journal/session ids are not shared.");
+            Require(records[0].Targets.Single().Id == recorder.Identity.Id(w), "Window ids are not shared.");
+            recorder.TogglePause();
+            string Fingerprint() => string.Join(";", Directory.EnumerateFiles(dir).Order().Select(f => File.ReadAllText(f)));
+            var paused = Fingerprint();
+            journal.Record(manager.Capture(), new([], [], []), "paused-test", []);
+            Until(() => completions.Count == 2, 4000, "Pause stopped runtime verification.");
+            Require(Fingerprint() == paused, "Pause still wrote diagnostics.");
+            recorder.TogglePause();
+            journal.Record(manager.Capture(), new([], [], []), "clear-test", []);
+            recorder.Clear(); recorder.TogglePause();
+            Until(() => completions.Count == 3, 4000, "Clear stopped runtime verification.");
+            Require(!Directory.EnumerateFiles(dir, "*.jsonl").Any(), "An old completion resurrected cleared records.");
+            Console.WriteLine("PASS: integrated recorder shares anonymous session/ids with plans; pause/clear stops logging, not verification.");
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    private static void VerifyElevatedTargets(IEnumerable<Process> children)
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        Require(new System.Security.Principal.WindowsPrincipal(identity).IsInRole(
+            System.Security.Principal.WindowsBuiltInRole.Administrator), "Native checks require an elevated runner.");
+        foreach (var child in children)
+        {
+            Require(OpenProcessToken(child.Handle, 8, out var token), "Could not read synthetic process token.");
+            try { Require(GetTokenInformation(token, 20, out var elevated, sizeof(int), out _) && elevated != 0,
+                "Synthetic target is not elevated."); }
+            finally { CloseHandle(token); }
+        }
+        Console.WriteLine("PASS: native harness and all synthetic window targets have administrator tokens.");
+    }
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(nint process, uint access, out nint token);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(nint token, int kind, out int value, int length, out int returned);
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint handle);
+
     private static IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>()
         .SelectMany(c => new[] { c }.Concat(Descendants(c)));
     private static void Pump(int milliseconds)

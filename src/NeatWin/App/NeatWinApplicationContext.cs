@@ -42,7 +42,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _verticalFillManager = new ReversibleVerticalFillManager();
         _autoTidyManager = new AutoTidyManager();
         _recorder = new RecorderSession();
-        _journal = new LayoutRunJournal(_windowManager, _referenceStore);
+        _journal = new LayoutRunJournal(_windowManager, _referenceStore, _recorder);
         _workspaceMonitor = new WorkspaceAutoTidyMonitor(_windowManager.Capture,
             () => _tidyRunning || _autoTidyManager.IsGestureActive || NativeWindowActivity.IsMoving);
         _autoTidyManager.GestureStarted += handle =>
@@ -69,7 +69,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _hotkeyWindow.HotkeyPressed += RunTidy;
         _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions, _automaticMode);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
-        _mainWindow.FullTilingRequested += (_, _) => RunTidy(showActivity: true, LayoutRoute.FullTiling, "explicit-tiling");
         _mainWindow.UndoRequested += (_, _) => UndoTidy();
         _mainWindow.RecorderPauseRequested += (_, _) => _recorder.TogglePause();
         _mainWindow.RecorderOpenDataRequested += (_, _) => OpenRecorderData();
@@ -83,7 +82,6 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open NeatWin", null, (_, _) => _mainWindow.BringToFrontFromTray());
         menu.Items.Add("Tidy visible windows", null, (_, _) => RunTidy());
-        menu.Items.Add("完整平铺", null, (_, _) => RunTidy(showActivity: true, LayoutRoute.FullTiling, "explicit-tiling"));
         menu.Items.Add("撤销上次整理", null, (_, _) => UndoTidy());
         menu.Items.Add("打开记录器页", null, (_, _) => _mainWindow.ShowRecorderPage());
         menu.Items.Add("人因排布偏好…", null, (_, _) => EditTaskPreferences());

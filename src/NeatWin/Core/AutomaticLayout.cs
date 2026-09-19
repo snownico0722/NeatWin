@@ -10,9 +10,8 @@ public static class AutomaticLayoutPolicy
 {
     public static AutomaticLayoutMode Read(int? value, bool? legacyEnabled)
     {
-        // Version 5 used persisted value 4 for automatic full tiling. Full tiling is now a
-        // separate explicit action, so migrate that value to automatic full Smart rather than
-        // continuing an unexpectedly destructive automatic tiler.
+        // The old fifth mode was a misunderstanding of laying out the UI controls. Migrate
+        // that stored value to automatic full Smart; never keep automatic tiling enabled.
         if (value is int raw)
         {
             if (raw == 4) return AutomaticLayoutMode.AutoFullAssist;
@@ -45,7 +44,7 @@ public static class AutomaticLayoutPolicy
         AutomaticLayoutMode.LightAssist => "拖动或缩放后，只小幅修正刚调整的窗口（原逻辑）。",
         AutomaticLayoutMode.FullAssist => "拖动或缩放结束后，运行与手点相同的完整 Smart 整理。",
         AutomaticLayoutMode.AutoFullAssist => "窗口开关、前后台、层级或位置改变后，自动运行完整 Smart；忽略自身改动。",
-        _ => "不自动改变窗口；仍可点击 Smart 整理、完整平铺或使用快捷键。",
+        _ => "不自动改变窗口；仍可点击整理按钮或使用快捷键。",
     };
 }
 

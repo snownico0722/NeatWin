@@ -22,7 +22,7 @@ internal sealed record RecorderStatus(
 internal sealed class RecorderSession : IDisposable
 {
     private readonly WindowManager _manager = new();
-    private readonly IntentReferenceStore _store = new();
+    private readonly IntentReferenceStore _store;
     private readonly ObservationIdentityTracker _identity = new();
     private readonly List<Pending> _pending = [];
     private readonly string _session = Guid.NewGuid().ToString("N");
@@ -47,8 +47,14 @@ internal sealed class RecorderSession : IDisposable
     private string? _error;
     private long _lastMaintenanceTick = long.MinValue;
 
-    internal RecorderSession()
+    internal string SessionId => _session;
+    internal ObservationIdentityTracker Identity => _identity;
+    internal long RecordingEpoch { get; private set; }
+    internal bool CanWriteDiagnostics => _ownsSingleton && !_paused && !_disposed;
+
+    internal RecorderSession(IntentReferenceStore? store = null)
     {
+        _store = store ?? new IntentReferenceStore();
         _singleton = new Mutex(true, @"Local\NeatWin.Recorder.v1", out _ownsSingleton);
         _moveCallback = OnMoveEvent;
         _contextCallback = OnContextEvent;
@@ -99,9 +105,9 @@ internal sealed class RecorderSession : IDisposable
             return;
         }
         _paused = !_paused;
+        RecordingEpoch++;
         _active = null;
         _pending.Clear();
-        _identity.Reset();
         _lastContext = null;
         _contextDirty = !_paused;
         PublishStatus();
@@ -134,10 +140,10 @@ internal sealed class RecorderSession : IDisposable
 
     internal void Clear()
     {
+        RecordingEpoch++;
         _store.Clear();
         _pending.Clear();
         _active = null;
-        _identity.Reset();
         _lastContext = null;
         _recorded = 0;
         _contextRecords = 0;

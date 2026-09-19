@@ -40,22 +40,19 @@ internal sealed class RecorderContext : ApplicationContext
         AddButton(buttons, "导出记录", ExportRecords);
         AddButton(buttons, "清空记录", Clear);
         panel.Controls.Add(buttons);
-        var startup = new CheckBox { Text = "登录 Windows 后启动独立记录器（主程序已内置，通常无需开启）", Dock = DockStyle.Fill };
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-            startup.Checked = key?.GetValue("NeatWin.Recorder") is string;
-        }
-        catch { }
-        startup.CheckedChanged += (_, _) =>
+        var startup = new Button { Text = "移除旧的独立记录器登录启动", Dock = DockStyle.Fill };
+        // A requireAdministrator executable cannot silently auto-elevate through a Run entry.
+        // Keep removal explicit; do not install an elevated scheduled task or weaken UAC.
+        startup.Click += (_, _) =>
         {
             try
             {
-                using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-                if (startup.Checked) key.SetValue("NeatWin.Recorder", $"\"{Environment.ProcessPath}\" --tray");
-                else key.DeleteValue("NeatWin.Recorder", throwOnMissingValue: false);
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                key?.DeleteValue("NeatWin.Recorder", throwOnMissingValue: false);
+                startup.Enabled = false;
+                startup.Text = "旧启动项已移除；请启动内置记录器的 NeatWin";
             }
-            catch (Exception ex) { MessageBox.Show(_window, ex.Message, "开机启动设置失败"); }
+            catch (Exception ex) { MessageBox.Show(_window, ex.Message, "清理启动项失败"); }
         };
         panel.Controls.Add(startup);
         _window.Controls.Add(panel);

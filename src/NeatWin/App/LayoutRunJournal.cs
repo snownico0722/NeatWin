@@ -1,5 +1,6 @@
 using NeatWin.Core;
 using NeatWin.Reference;
+using NeatWin.Recording;
 using NeatWin.Windows;
 
 namespace NeatWin.App;
@@ -9,15 +10,18 @@ internal sealed class LayoutRunJournal : IDisposable
 {
     private readonly WindowManager _manager;
     private readonly IntentReferenceStore _store;
-    private readonly ObservationIdentityTracker _identity = new();
-    private readonly string _session = Guid.NewGuid().ToString("N");
+    private readonly ObservationIdentityTracker _identity;
+    private readonly string _session;
+    private readonly RecorderSession? _recorder;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 600 };
     private readonly List<Pending> _pending = [];
     internal event Action<LayoutRunObservation>? Completed;
 
-    internal LayoutRunJournal(WindowManager manager, IntentReferenceStore store)
+    internal LayoutRunJournal(WindowManager manager, IntentReferenceStore store, RecorderSession? recorder = null)
     {
-        _manager = manager; _store = store;
+        _manager = manager; _store = store; _recorder = recorder;
+        _identity = recorder?.Identity ?? new ObservationIdentityTracker();
+        _session = recorder?.SessionId ?? Guid.NewGuid().ToString("N");
         _timer.Tick += (_, _) => CompleteDue();
     }
 
@@ -39,13 +43,22 @@ internal sealed class LayoutRunJournal : IDisposable
                 g.Selected, g.StackEvidence, g.Candidates, g.Task)).ToArray();
             var observation = new LayoutRunObservation(2, _session, Guid.NewGuid().ToString("N"), trigger,
                 frame, targets, layers, groups, null, "requested-not-yet-verified", notes);
-            _store.AppendPlan(observation);
+            var epoch = _recorder?.RecordingEpoch ?? 0;
+            var recorded = TryAppend(observation, epoch);
             if (_pending.Count >= 8) _pending.RemoveAt(0);
             foreach (var old in _pending) old.Intervened = true;
-            _pending.Add(new(observation, before.Select(w => w.Handle).ToHashSet(), Environment.TickCount64));
+            _pending.Add(new(observation, before.Select(w => w.Handle).ToHashSet(), Environment.TickCount64, epoch, recorded));
             _timer.Start();
         }
         catch { } // Diagnostics must not prevent a layout or an undo.
+    }
+
+    private bool TryAppend(LayoutRunObservation observation, long epoch)
+    {
+        if (_recorder is not null && (!_recorder.CanWriteDiagnostics || _recorder.RecordingEpoch != epoch)) return false;
+        try { _store.AppendPlan(observation); return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { System.Diagnostics.Trace.TraceWarning($"Layout diagnostic write failed: {ex.Message}"); return false; }
     }
 
     private void CompleteDue()
@@ -62,7 +75,9 @@ internal sealed class LayoutRunJournal : IDisposable
                         .Select(w => w.Id).SequenceEqual(order));
                 var actual = requested with { Actual = frame, Outcome = pending.Intervened || NativeWindowActivity.IsMoving ? "intervened" :
                     matches ? "observed-match" : "observed-difference" };
-                _store.AppendPlan(actual);
+                // Pause/clear stops writes, not the runtime's placement verification. An old
+                // completion must not resurrect cleared data or become a new recording session.
+                if (pending.Recorded) TryAppend(actual, pending.Epoch);
                 Completed?.Invoke(actual);
             }
             catch { }
@@ -70,15 +85,15 @@ internal sealed class LayoutRunJournal : IDisposable
         if (_pending.Count == 0) _timer.Stop();
     }
 
-    private static bool Near(RectI a, RectI b) => Math.Abs(a.X - b.X) <= 3 && Math.Abs(a.Y - b.Y) <= 3 &&
-        Math.Abs(a.Width - b.Width) <= 3 && Math.Abs(a.Height - b.Height) <= 3;
-
+    private static bool Near(RectI a, RectI b) => WindowStateRules.Near(a, b);
     public void Dispose() { _timer.Stop(); _timer.Dispose(); _pending.Clear(); }
-    private sealed class Pending(LayoutRunObservation observation, HashSet<nint> handles, long tick)
+    private sealed class Pending(LayoutRunObservation observation, HashSet<nint> handles, long tick, long epoch, bool recorded)
     {
         internal LayoutRunObservation Observation { get; } = observation;
         internal HashSet<nint> Handles { get; } = handles;
         internal long Tick { get; } = tick;
+        internal long Epoch { get; } = epoch;
+        internal bool Recorded { get; } = recorded;
         internal bool Intervened { get; set; }
     }
 }

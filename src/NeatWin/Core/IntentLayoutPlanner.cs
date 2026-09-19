@@ -199,12 +199,14 @@ internal static partial class IntentLayoutPlanner
         var foreground = Array.FindIndex(group, item => item.Window.IsForeground);
         if (foreground >= 0 && positions[foreground] != 0) return false;
 
-        // A materially occluded window is evidence of parking/background use, not evidence that it
-        // should be promoted. It may move/resize to become more useful, but its Z position remains
-        // stable unless it was already at that rank. This directly separates geometry strength
-        // from layer aggressiveness.
-        for (var i = 0; i < group.Length; i++)
-            if (group[i].VisibleRatio < .65 && positions[i] < i) return false;
+        // Clicking our own UI leaves no external IsForeground flag. Preserve existing
+        // occlusion relationships anyway; a visible-area gain is not permission to surface a
+        // parked window. Use geometry, not potentially stale/caller-supplied visible ratios.
+        for (var back = 1; back < group.Length; back++)
+        for (var front = 0; front < back; front++)
+            if (positions[back] < positions[front] &&
+                group[front].Window.VisualRect.Intersect(group[back].Window.VisualRect).Area > 0)
+                return false;
         return true;
     }
 

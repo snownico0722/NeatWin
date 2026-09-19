@@ -7,10 +7,9 @@ internal sealed class MainWindow : Form
 {
     private readonly Label _activityLabel;
     private readonly SegmentedSelector<TidyAlgorithmMode> _algorithmModeSelector;
-    private readonly ComboBox _automaticMode;
+    private readonly SegmentedSelector<AutomaticLayoutMode> _automaticMode;
     private readonly Label _automaticDescription;
     private readonly Button _tidyButton;
-    private readonly Button _fullTilingButton;
     private readonly SegmentedSelector<MainSection> _sectionSelector;
     private Label _hotkeyStatusLabel = null!;
     private CheckBox _ctrlBox = null!;
@@ -38,7 +37,9 @@ internal sealed class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(780, 620);
+        ClientSize = new Size(780, 680);
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 9.5F);
         BackColor = UiTheme.Page;
         ForeColor = UiTheme.Text;
@@ -51,7 +52,7 @@ internal sealed class MainWindow : Form
             RowCount = 6,
             BackColor = UiTheme.Page,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
@@ -61,95 +62,58 @@ internal sealed class MainWindow : Form
 
         var header = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 2,
-            BackColor = UiTheme.Page,
-            Margin = new Padding(0),
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3,
+            BackColor = UiTheme.Page, Margin = new Padding(0),
         };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var headerActions = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = new Padding(0),
-            BackColor = UiTheme.Page,
-        };
-
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _algorithmModeSelector = new SegmentedSelector<TidyAlgorithmMode>(
             new SegmentOption<TidyAlgorithmMode>(TidyAlgorithmMode.Smart, "Smart"),
             new SegmentOption<TidyAlgorithmMode>(TidyAlgorithmMode.Classic, "Classic"))
-        {
-            Width = 200,
-            Margin = new Padding(0, 0, 16, 0),
-        };
+        { Width = 200, Anchor = AnchorStyles.Left, Margin = new Padding(0) };
         _algorithmModeSelector.SetValue(initialOptions.AlgorithmMode, raiseEvent: false);
-        headerActions.Controls.Add(_algorithmModeSelector);
+        header.Controls.Add(_algorithmModeSelector, 0, 0);
+        using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+        {
+            var elevated = new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            header.Controls.Add(new Label
+            {
+                Text = elevated ? "管理员运行" : "未提权：管理员窗口可能无法操作",
+                AutoSize = true, Anchor = AnchorStyles.Right,
+                ForeColor = elevated ? UiTheme.TextMuted : UiTheme.Danger,
+            }, 1, 0);
+        }
 
-        var autoHost = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = new Padding(0, 6, 0, 0),
-            BackColor = UiTheme.Page,
-        };
-        autoHost.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "自动整理",
-            ForeColor = UiTheme.Text,
-            Font = UiTheme.Semibold(9.5F),
-            Margin = new Padding(0, 2, 9, 0),
-        });
-        _automaticMode = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 190, Margin = new Padding(0), AccessibleName = "自动整理档位",
-        };
-        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>()) _automaticMode.Items.Add(AutomaticLayoutPolicy.Name(mode));
-        _automaticMode.SelectedIndex = (int)automaticMode;
-        autoHost.Controls.Add(_automaticMode);
-        headerActions.Controls.Add(autoHost);
-
-        header.Controls.Add(headerActions, 1, 0);
+        // Four choices are visible without opening a menu. "平铺" describes the controls,
+        // not an additional automatic window-tiling policy.
+        _automaticMode = new SegmentedSelector<AutomaticLayoutMode>(
+            Enum.GetValues<AutomaticLayoutMode>().Select(mode =>
+                new SegmentOption<AutomaticLayoutMode>(mode, AutomaticLayoutPolicy.Name(mode))).ToArray())
+        { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 2), AccessibleName = "自动整理档位" };
+        _automaticMode.SetValue(automaticMode, raiseEvent: false);
+        header.Controls.Add(_automaticMode, 0, 1);
+        header.SetColumnSpan(_automaticMode, 2);
         _automaticDescription = new Label
         {
-            Dock = DockStyle.Fill, AutoSize = true, ForeColor = UiTheme.TextMuted,
-            Text = AutomaticLayoutPolicy.Description(automaticMode), Margin = new Padding(0, 4, 0, 6),
+            Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted,
+            Text = AutomaticLayoutPolicy.Description(automaticMode), Margin = new Padding(0, 4, 0, 4),
         };
-        header.Controls.Add(_automaticDescription, 0, 1);
+        header.Controls.Add(_automaticDescription, 0, 2);
         header.SetColumnSpan(_automaticDescription, 2);
         root.Controls.Add(header, 0, 0);
 
-        var primaryActions = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10),
-            BackColor = UiTheme.Page,
-        };
-        primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
-        primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
         _tidyButton = new Button
         {
-            Dock = DockStyle.Fill, Text = "Smart 整理当前窗口", Font = UiTheme.Semibold(12F),
-            Margin = new Padding(0, 0, 6, 0),
+            Dock = DockStyle.Fill, Text = "整理当前可见窗口", Font = UiTheme.Semibold(12F),
+            Margin = new Padding(0, 0, 0, 10),
         };
         UiTheme.StylePrimary(_tidyButton);
         _tidyButton.Click += (_, _) => TidyRequested?.Invoke(this, EventArgs.Empty);
-        primaryActions.Controls.Add(_tidyButton, 0, 0);
-        _fullTilingButton = new Button
-        {
-            Dock = DockStyle.Fill, Text = "完整平铺", Font = UiTheme.Semibold(11F),
-            Margin = new Padding(6, 0, 0, 0),
-        };
-        UiTheme.StyleSecondary(_fullTilingButton);
-        _fullTilingButton.Click += (_, _) => FullTilingRequested?.Invoke(this, EventArgs.Empty);
-        primaryActions.Controls.Add(_fullTilingButton, 1, 0);
-        root.Controls.Add(primaryActions, 0, 1);
+        root.Controls.Add(_tidyButton, 0, 1);
 
         _activityLabel = new Label
         {
@@ -221,7 +185,7 @@ internal sealed class MainWindow : Form
 
         _algorithmModeSelector.ValueChanged += OnAlgorithmModeChanged;
         _sectionSelector.ValueChanged += (_, _) => ShowSection(_sectionSelector.Value);
-        _automaticMode.SelectedIndexChanged += OnAutoTidyChanged;
+        _automaticMode.ValueChanged += OnAutoTidyChanged;
         SetAutomaticLayoutMode(automaticMode);
 
         SetHotkeyControls(initialBinding);
@@ -229,7 +193,6 @@ internal sealed class MainWindow : Form
     }
 
     internal event EventHandler? TidyRequested;
-    internal event EventHandler? FullTilingRequested;
     internal event EventHandler? UndoRequested;
     internal event EventHandler? RecorderPauseRequested;
     internal event EventHandler? RecorderOpenDataRequested;
@@ -268,7 +231,7 @@ internal sealed class MainWindow : Form
         _suppressAutoTidyChange = true;
         try
         {
-            _automaticMode.SelectedIndex = (int)mode;
+            _automaticMode.SetValue(mode, raiseEvent: false);
             _automaticDescription.Text = AutomaticLayoutPolicy.Description(mode);
         }
         finally
@@ -309,8 +272,7 @@ internal sealed class MainWindow : Form
             return;
         }
 
-        if (_automaticMode.SelectedIndex < 0) return;
-        var mode = (AutomaticLayoutMode)_automaticMode.SelectedIndex;
+        var mode = _automaticMode.Value;
         SetAutomaticLayoutMode(mode);
         AutoTidyChangeRequested?.Invoke(this, new AutoTidyChangeEventArgs(mode));
     }
@@ -347,8 +309,8 @@ internal sealed class MainWindow : Form
 
     private Control BuildRecorderPage()
     {
-        var page = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.Page, Padding = new Padding(0, 8, 0, 0) };
-        var card = new ModernCard { Dock = DockStyle.Top, Height = 230 };
+        var page = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.Page, Padding = new Padding(0, 8, 0, 0), AutoScroll = true };
+        var card = new ModernCard { Dock = DockStyle.Top, Height = 264 };
         page.Controls.Add(card);
         var layout = new TableLayoutPanel
         {
@@ -367,7 +329,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted,
             Text = "NeatWin 运行时自动记录窗口几何、层级、前台和拖动／缩放结果，用于后续分析操作习惯。\n" +
-                   "记录器与整理器共用同一会话标记，可以区分你的操作和 NeatWin 自己的介入。",
+                   "观察与整理诊断共用匿名编号。暂停后停止写入新记录；不影响整理功能。",
         }, 0, 1);
         _recorderStatusLabel = new Label { Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted, TextAlign = ContentAlignment.MiddleLeft };
         layout.Controls.Add(_recorderStatusLabel, 0, 2);
