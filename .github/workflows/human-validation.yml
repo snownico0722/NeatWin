@@ -1,0 +1,33 @@
+name: Human validation adapter
+on:
+  push:
+    branches: [agent/human-validation-20260919]
+permissions:
+  contents: read
+concurrency:
+  group: human-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Confirm frozen production code
+        run: git diff --exit-code 014b9888ba9412eb1f125b11765479df5f5447bb HEAD -- src/
+      - name: Publish self-contained adapter
+        run: >-
+          dotnet publish tools/NeatWin.Validation/NeatWin.Validation.csproj -c Release
+          -r linux-x64 --self-contained true -p:PublishSingleFile=true
+          -p:DebugType=None -p:DebugSymbols=false -o artifacts/validation
+      - name: Synthetic adapter smoke only
+        run: |
+          echo '{"Id":"synthetic-smoke","Rects":[{"X":40,"Y":100,"Width":1500,"Height":1000},{"X":1000,"Y":130,"Width":1400,"Height":950}],"Area":{"X":0,"Y":0,"Width":2560,"Height":1380},"Relation":"JointView"}' > /tmp/input.jsonl
+          artifacts/validation/NeatWin.Validation /tmp/input.jsonl /tmp/output.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-validation-linux
+          path: artifacts/validation/
+          retention-days: 14
