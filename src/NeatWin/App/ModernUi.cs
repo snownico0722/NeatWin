@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 
 namespace NeatWin.App;
@@ -251,6 +252,7 @@ internal sealed class SegmentedSelector<T> : UserControl
 
     internal event EventHandler? ValueChanged;
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal T Value
     {
         get => _value;
