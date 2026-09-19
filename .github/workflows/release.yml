@@ -1,0 +1,204 @@
+name: Formal Release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches:
+      - main
+      - 'agent/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: formal-release-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.source.outputs.publish }}
+      sha: ${{ steps.source.outputs.sha }}
+      kind: ${{ steps.source.outputs.kind }}
+      pr: ${{ steps.source.outputs.pr }}
+    steps:
+      - name: Resolve release source
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+            echo "kind=pr" >> "$GITHUB_OUTPUT"
+            echo "pr=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "kind=main" >> "$GITHUB_OUTPUT"
+            echo "pr=" >> "$GITHUB_OUTPUT"
+          else
+            PR_NUMBER=$(gh pr list --repo "${{ github.repository }}" --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number // empty')
+            if [[ -z "$PR_NUMBER" ]]; then
+              echo "No open PR for ${{ github.ref_name }}; skipping release."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "kind=pr" >> "$GITHUB_OUTPUT"
+            echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: detect
+    if: needs.detect.outputs.publish == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect.outputs.sha }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore tests/NeatWin.Tests/NeatWin.Tests.csproj
+
+      - name: Test
+        run: >-
+          dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj
+          --configuration Release --no-restore
+          --logger "trx;LogFileName=release-tests.trx"
+          --results-directory ReleaseTestResults
+
+      - name: Deterministic layout stress
+        run: >-
+          dotnet run --project tools/NeatWin.Stress/NeatWin.Stress.csproj
+          --configuration Release -- 1000
+
+      - name: Publish main x64
+        run: >-
+          dotnet publish src/NeatWin/NeatWin.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --output release/win-x64
+
+      - name: Publish recorder x64
+        run: >-
+          dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --output release/win-x64
+
+      - name: Startup smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('NeatWin.exe', 'NeatWin.Recorder.exe')) {
+            $executable = (Resolve-Path "release/win-x64/$name").Path
+            $process = Start-Process -FilePath $executable -PassThru
+            try {
+              if (-not $process.WaitForInputIdle(20000)) { throw "$name did not reach a GUI message loop." }
+              Start-Sleep -Seconds 3
+              $process.Refresh()
+              if ($process.HasExited) { throw "$name exited during startup: $($process.ExitCode)" }
+            } finally {
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                $process.WaitForExit()
+              }
+            }
+          }
+
+      - name: Prepare package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item README.md release/win-x64/README.md
+          New-Item -ItemType Directory -Force release/win-x64/docs | Out-Null
+          Copy-Item docs/*.md release/win-x64/docs/
+          Get-ChildItem release/win-x64/*.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))"
+          } | Set-Content release/win-x64/SHA256SUMS.txt
+          $short = "${{ needs.detect.outputs.sha }}".Substring(0, 8)
+          $date = (Get-Date).ToUniversalTime().ToString('yyyy.MM.dd')
+          if ("${{ needs.detect.outputs.kind }}" -eq "pr") {
+            $tag = "pr-${{ needs.detect.outputs.pr }}-$short"
+            $title = "NeatWin PR #${{ needs.detect.outputs.pr }} · $short"
+            $latest = "false"
+            $context = "Pull Request #${{ needs.detect.outputs.pr }}"
+          } else {
+            $tag = "v$date.${{ github.run_number }}"
+            $title = "NeatWin $tag"
+            $latest = "true"
+            $context = "main"
+          }
+          Compress-Archive -Path release/win-x64/* -DestinationPath release/NeatWin-win-x64.zip -Force
+          $zipHash = (Get-FileHash release/NeatWin-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $exeHashes = Get-Content release/win-x64/SHA256SUMS.txt
+          $notes = @(
+            "# $title",
+            "",
+            "正式发布包 / Formal release build",
+            "",
+            "- Source: $context",
+            "- Commit: ${{ needs.detect.outputs.sha }}",
+            "- Windows: x64",
+            "- Runtime: self-contained .NET 8",
+            "- Tests: unit/regression + deterministic layout stress + GUI startup smoke",
+            "",
+            "## SHA-256",
+            "",
+            "$zipHash  NeatWin-win-x64.zip",
+            "",
+            $exeHashes,
+            "",
+            "PR 构建是正常 GitHub Release，但不会覆盖 Latest；合并进入 main 后会自动再生成 Latest 正式版。"
+          )
+          $notes | Set-Content release/RELEASE_NOTES.md
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "title=$title" >> $env:GITHUB_OUTPUT
+          "latest=$latest" >> $env:GITHUB_OUTPUT
+
+      - name: Publish or refresh GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.package.outputs.tag }}"
+          $title = "${{ steps.package.outputs.title }}"
+          $latest = "${{ steps.package.outputs.latest }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes-file release/RELEASE_NOTES.md --latest=$latest
+            gh release upload $tag release/NeatWin-win-x64.zip release/win-x64/SHA256SUMS.txt --clobber
+          } else {
+            gh release create $tag release/NeatWin-win-x64.zip release/win-x64/SHA256SUMS.txt --target "${{ needs.detect.outputs.sha }}" --title $title --notes-file release/RELEASE_NOTES.md --latest=$latest
+          }
+
+      - name: Upload workflow copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-formal-release-${{ steps.package.outputs.tag }}
+          path: |
+            release/NeatWin-win-x64.zip
+            release/win-x64/SHA256SUMS.txt
+            release/RELEASE_NOTES.md
+          retention-days: 14
