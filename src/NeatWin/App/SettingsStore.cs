@@ -31,7 +31,24 @@ internal sealed class SettingsStore
             settings.Win);
     }
 
-    internal bool LoadAutoTidyEnabled() => LoadStoredSettings().AutoTidyEnabled ?? false;
+    internal SettingsStore(string settingsPath) => _settingsPath = settingsPath;
+
+    internal AutomaticLayoutMode LoadAutomaticLayoutMode()
+    {
+        var settings = LoadStoredSettings();
+        return AutomaticLayoutPolicy.Read(settings.AutomaticLayoutMode, settings.AutoTidyEnabled);
+    }
+
+    internal void SaveAutomaticLayoutMode(AutomaticLayoutMode mode)
+    {
+        var settings = LoadStoredSettings();
+        mode = AutomaticLayoutPolicy.Read((int)mode, false);
+        settings.AutomaticLayoutMode = (int)mode;
+        settings.AutoTidyEnabled = mode != AutomaticLayoutMode.Off; // Older versions keep their toggle.
+        WriteStoredSettings(settings);
+    }
+
+    internal bool LoadAutoTidyEnabled() => LoadAutomaticLayoutMode() != AutomaticLayoutMode.Off;
 
     internal TidyOptions LoadTidyOptions()
     {
@@ -97,12 +114,8 @@ internal sealed class SettingsStore
         WriteStoredSettings(settings);
     }
 
-    internal void SaveAutoTidyEnabled(bool enabled)
-    {
-        var settings = LoadStoredSettings();
-        settings.AutoTidyEnabled = enabled;
-        WriteStoredSettings(settings);
-    }
+    internal void SaveAutoTidyEnabled(bool enabled) =>
+        SaveAutomaticLayoutMode(enabled ? AutomaticLayoutMode.LightAssist : AutomaticLayoutMode.Off);
 
     internal void SaveTidyOptions(TidyOptions options)
     {
@@ -196,6 +209,7 @@ internal sealed class SettingsStore
         public bool Shift { get; set; }
         public bool Win { get; set; }
         public bool? AutoTidyEnabled { get; set; }
+        public int? AutomaticLayoutMode { get; set; }
 
         public int? AlgorithmMode { get; set; }
         public int? SmartStrength { get; set; }

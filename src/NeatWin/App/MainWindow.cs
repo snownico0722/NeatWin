@@ -6,7 +6,9 @@ internal sealed class MainWindow : Form
 {
     private readonly Label _activityLabel;
     private readonly SegmentedSelector<TidyAlgorithmMode> _algorithmModeSelector;
-    private readonly ModernToggle _autoTidyToggle;
+    private readonly ComboBox _automaticMode;
+    private readonly Label _automaticDescription;
+    private readonly Button _tidyButton;
     private readonly SegmentedSelector<MainSection> _sectionSelector;
     private Label _hotkeyStatusLabel = null!;
     private CheckBox _ctrlBox = null!;
@@ -24,14 +26,14 @@ internal sealed class MainWindow : Form
         HotkeyBinding initialBinding,
         TidyOptions initialOptions,
         SmartBehaviorOptions initialBehaviorOptions,
-        bool autoTidyEnabled)
+        AutomaticLayoutMode automaticMode)
     {
         Text = "NeatWin";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(720, 580);
+        ClientSize = new Size(780, 620);
         Font = new Font("Segoe UI", 9.5F);
         BackColor = UiTheme.Page;
         ForeColor = UiTheme.Text;
@@ -44,7 +46,7 @@ internal sealed class MainWindow : Form
             RowCount = 6,
             BackColor = UiTheme.Page,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
@@ -56,7 +58,7 @@ internal sealed class MainWindow : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 1,
+            RowCount = 2,
             BackColor = UiTheme.Page,
             Margin = new Padding(0),
         };
@@ -94,32 +96,41 @@ internal sealed class MainWindow : Form
         autoHost.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "随手辅助",
+            Text = "自动整理",
             ForeColor = UiTheme.Text,
             Font = UiTheme.Semibold(9.5F),
             Margin = new Padding(0, 2, 9, 0),
         });
-        _autoTidyToggle = new ModernToggle
+        _automaticMode = new ComboBox
         {
-            Checked = autoTidyEnabled,
-            Margin = new Padding(0),
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 190, Margin = new Padding(0), AccessibleName = "自动整理档位",
         };
-        autoHost.Controls.Add(_autoTidyToggle);
+        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>()) _automaticMode.Items.Add(AutomaticLayoutPolicy.Name(mode));
+        _automaticMode.SelectedIndex = (int)automaticMode;
+        autoHost.Controls.Add(_automaticMode);
         headerActions.Controls.Add(autoHost);
 
         header.Controls.Add(headerActions, 1, 0);
+        _automaticDescription = new Label
+        {
+            Dock = DockStyle.Fill, AutoSize = true, ForeColor = UiTheme.TextMuted,
+            Text = AutomaticLayoutPolicy.Description(automaticMode), Margin = new Padding(0, 4, 0, 6),
+        };
+        header.Controls.Add(_automaticDescription, 0, 1);
+        header.SetColumnSpan(_automaticDescription, 2);
         root.Controls.Add(header, 0, 0);
 
-        var tidyButton = new Button
+        _tidyButton = new Button
         {
             Dock = DockStyle.Fill,
             Text = "整理当前可见窗口",
             Font = UiTheme.Semibold(12F),
             Margin = new Padding(0, 0, 0, 10),
         };
-        UiTheme.StylePrimary(tidyButton);
-        tidyButton.Click += (_, _) => TidyRequested?.Invoke(this, EventArgs.Empty);
-        root.Controls.Add(tidyButton, 0, 1);
+        UiTheme.StylePrimary(_tidyButton);
+        _tidyButton.Click += (_, _) => TidyRequested?.Invoke(this, EventArgs.Empty);
+        root.Controls.Add(_tidyButton, 0, 1);
 
         _activityLabel = new Label
         {
@@ -191,7 +202,8 @@ internal sealed class MainWindow : Form
 
         _algorithmModeSelector.ValueChanged += OnAlgorithmModeChanged;
         _sectionSelector.ValueChanged += (_, _) => ShowSection(_sectionSelector.Value);
-        _autoTidyToggle.CheckedChanged += OnAutoTidyChanged;
+        _automaticMode.SelectedIndexChanged += OnAutoTidyChanged;
+        SetAutomaticLayoutMode(automaticMode);
 
         SetHotkeyControls(initialBinding);
         FormClosing += OnFormClosing;
@@ -228,12 +240,14 @@ internal sealed class MainWindow : Form
         _algorithmModeSelector.SetValue(activeOptions.AlgorithmMode, raiseEvent: false);
     }
 
-    internal void SetAutoTidyEnabled(bool enabled)
+    internal void SetAutomaticLayoutMode(AutomaticLayoutMode mode)
     {
         _suppressAutoTidyChange = true;
         try
         {
-            _autoTidyToggle.Checked = enabled;
+            _automaticMode.SelectedIndex = (int)mode;
+            _automaticDescription.Text = AutomaticLayoutPolicy.Description(mode);
+            _tidyButton.Text = mode == AutomaticLayoutMode.FullTiling ? "平铺当前工作区窗口" : "整理当前可见窗口";
         }
         finally
         {
@@ -273,9 +287,10 @@ internal sealed class MainWindow : Form
             return;
         }
 
-        AutoTidyChangeRequested?.Invoke(
-            this,
-            new AutoTidyChangeEventArgs(_autoTidyToggle.Checked));
+        if (_automaticMode.SelectedIndex < 0) return;
+        var mode = (AutomaticLayoutMode)_automaticMode.SelectedIndex;
+        SetAutomaticLayoutMode(mode);
+        AutoTidyChangeRequested?.Invoke(this, new AutoTidyChangeEventArgs(mode));
     }
 
     private void ShowSection(MainSection section)
@@ -498,7 +513,7 @@ internal sealed class HotkeyChangeEventArgs(HotkeyBinding binding) : EventArgs
     internal HotkeyBinding Binding { get; } = binding;
 }
 
-internal sealed class AutoTidyChangeEventArgs(bool enabled) : EventArgs
+internal sealed class AutoTidyChangeEventArgs(AutomaticLayoutMode mode) : EventArgs
 {
-    internal bool Enabled { get; } = enabled;
+    internal AutomaticLayoutMode Mode { get; } = mode;
 }

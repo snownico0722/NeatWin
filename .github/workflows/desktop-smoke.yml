@@ -38,6 +38,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NeatWin-desktop-smoke-results
-          path: desktop-smoke.txt
+          path: |
+            desktop-smoke.txt
+            automation-mode-ui.png
           if-no-files-found: warn
           retention-days: 14
