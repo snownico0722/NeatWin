@@ -60,10 +60,11 @@ internal static partial class IntentLayoutPlanner
                 }
                 AddVerticalFillCandidates(candidates, group, original, taskContext);
                 var stackSignal = StackSignal(group, original);
-                TaskCostBreakdown Breakdown(Candidate c) => TaskCost(group, original, c, task, area, taskContext, hint, obstacles);
+                TaskCostBreakdown Breakdown(Candidate c) => EffectiveBreakdown(
+                    TaskCost(group, original, c, task, area, taskContext, hint, obstacles), options.SmartStrength, task);
                 candidates = candidates.DistinctBy(c => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order)).ToList();
                 var best = candidates[0]; var baselineBreakdown = Breakdown(best);
-                var baseline = TaskScore(baselineBreakdown, options.SmartStrength, task); var bestScore = baseline;
+                var baseline = baselineBreakdown.Total; var bestScore = baseline;
                 var beforeExposure = MeasureBeforeExposure(group, original, area, obstacles);
                 var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, baselineBreakdown) };
                 var seen = candidates.Select(CandidateKey).ToHashSet();
@@ -72,7 +73,7 @@ internal static partial class IntentLayoutPlanner
                 // safety floors and movement origin. Never learn or re-infer from our own output.
                 // This is bounded candidate lookahead, not repeated native window application.
                 if (group.Length is >= 2 and <= 8)
-                for (var generation = 1; generation <= 3 && best.Kind != "keep"; generation++)
+                for (var generation = 1; generation <= 2 && best.Kind != "keep"; generation++)
                 {
                     var seed = best;
                     var completion = new List<Candidate>();
@@ -102,7 +103,7 @@ internal static partial class IntentLayoutPlanner
                         null;
                     if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection, Generation: generation)); return; }
                     var breakdown = Breakdown(candidate);
-                    var score = TaskScore(breakdown, options.SmartStrength, task);
+                    var score = breakdown.Total;
                     audits.Add(new(candidate.Kind, score, null, breakdown, generation));
                     var threshold = SelectionThreshold(options.SmartStrength, task);
                     var needsRescue = options.RescueOffscreenWindows && original.Any(r =>
@@ -134,7 +135,7 @@ internal static partial class IntentLayoutPlanner
         return new(moves, layers, traces);
     }
 
-    internal static double TaskScore(TaskCostBreakdown breakdown, SmartTidyStrength strength,
+    internal static TaskCostBreakdown EffectiveBreakdown(TaskCostBreakdown breakdown, SmartTidyStrength strength,
         TaskEvidence[]? relations = null)
     {
         // Stronger Smart means lower resistance to useful geometry reflow, not weaker visibility,
@@ -152,10 +153,15 @@ internal static partial class IntentLayoutPlanner
             SmartTidyStrength.Assertive => 0.40,
             _ => 0.68,
         };
-        return breakdown.InformationLoss + breakdown.Switching + breakdown.PeripheralLoss +
-            breakdown.Alignment + breakdown.Uncertainty + breakdown.Feedback +
-            adaptationScale * (breakdown.Continuity + breakdown.Reflow);
+        return breakdown with
+        {
+            Continuity = breakdown.Continuity * adaptationScale,
+            Reflow = breakdown.Reflow * adaptationScale,
+        };
     }
+
+    internal static double TaskScore(TaskCostBreakdown breakdown, SmartTidyStrength strength,
+        TaskEvidence[]? relations = null) => EffectiveBreakdown(breakdown, strength, relations).Total;
 
     internal static double SelectionThreshold(SmartTidyStrength strength, TaskEvidence[]? relations = null)
     {
