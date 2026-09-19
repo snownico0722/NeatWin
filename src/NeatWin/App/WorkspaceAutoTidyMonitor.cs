@@ -13,6 +13,7 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
     private readonly AutomaticLayoutScheduler _scheduler = new();
     private readonly NativeMethods.WinEventProc _callback;
     private readonly List<nint> _hooks = [];
+    private readonly Dictionary<nint, nint> _observedStamps = new();
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 150 };
     private int _messageQueued;
     private bool _disposed;
@@ -33,7 +34,10 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
     internal bool SetMode(AutomaticLayoutMode mode, bool arrangeNow = false)
     {
         _timer.Stop(); RemoveHooks();
-        _scheduler.Reset(mode, _capture(), Environment.TickCount64);
+        var baseline = _capture();
+        _scheduler.Reset(mode, baseline, Environment.TickCount64);
+        _observedStamps.Clear();
+        foreach (var window in baseline) _observedStamps[window.Handle] = AutomationGuard.Stamp(window.Handle);
         if (AutomaticLayoutPolicy.WatchesWorkspace(mode))
         {
             // Top-level create/destroy/show/hide/reorder; state/location; foreground; minimize.
@@ -94,7 +98,19 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
         try
         {
             var snapshot = _capture();
-            var marked = snapshot.Where(w => AutomationGuard.IsMarked(w.Handle)).Select(w => w.Handle).ToHashSet();
+            // An unexpired property can belong to an earlier layout, including one before a
+            // mode switch. Only a NEW stamp attributes an otherwise unknown change to NeatWin;
+            // known requested targets are tracked separately by the scheduler through settling.
+            var marked = new HashSet<nint>();
+            foreach (var window in snapshot)
+            {
+                var stamp = AutomationGuard.Stamp(window.Handle);
+                if (stamp != _observedStamps.GetValueOrDefault(window.Handle) && AutomationGuard.IsMarked(window.Handle))
+                    marked.Add(window.Handle);
+                _observedStamps[window.Handle] = stamp;
+            }
+            var present = snapshot.Select(w => w.Handle).ToHashSet();
+            foreach (var handle in _observedStamps.Keys.Where(h => !present.Contains(h)).ToArray()) _observedStamps.Remove(handle);
             var request = _scheduler.Observe(snapshot, Environment.TickCount64, _busy(), marked);
             if (!_scheduler.HasPending) _timer.Stop();
             if (request is not null) Requested?.Invoke(request);
