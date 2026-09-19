@@ -93,8 +93,16 @@ internal static partial class IntentLayoutPlanner
         {
             var window = windows[i].Window; var a = original[i]; var b = candidate.Rects[i];
             var bleed = BleedBudget(window, context);
-            if (!IntentEvidence.IsValidRect(b) || b.Left < area.Left - bleed.Left || b.Right > area.Right + bleed.Right ||
-                b.Top < area.Top || b.Bottom > area.Bottom) return false;
+            // A fixed/resize-disabled window larger than the work area cannot fit entirely.
+            // Only the explicit rescue candidate may retain that unavoidable overflow; it must
+            // equal the bounded rescue target and cannot resize the window or invent more area.
+            var oversizedRescue = candidate.Kind == "rescue" && options.RescueOffscreenWindows &&
+                (!window.IsResizable || !context.Preferences.AllowUsefulResize) &&
+                (a.Width > area.Width || a.Height > area.Height) &&
+                b == Fit(a, window, options, allowResize: false);
+            if (!IntentEvidence.IsValidRect(b) || (!oversizedRescue &&
+                (b.Left < area.Left - bleed.Left || b.Right > area.Right + bleed.Right ||
+                 b.Top < area.Top || b.Bottom > area.Bottom))) return false;
             if (window.IsTopmost && b != a) return false;
             if ((!window.IsResizable || !context.Preferences.AllowUsefulResize) && (b.Width != a.Width || b.Height != a.Height)) return false;
             if (window.IsResizable && (b.Width < Math.Min(a.Width, Math.Min(options.MinimumWidth, area.Width)) ||
