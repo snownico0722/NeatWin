@@ -36,7 +36,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Restore
         run: dotnet restore tests/NeatWin.Tests/NeatWin.Tests.csproj
@@ -82,17 +82,15 @@ jobs:
       - name: Publish main x64
         run: >-
           dotnet publish src/NeatWin/NeatWin.csproj
-          --configuration Release --runtime win-x64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --configuration Release --runtime win-x64 --self-contained false
+          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
           --output artifacts/win-x64
 
       - name: Publish recorder x64
         run: >-
           dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj
-          --configuration Release --runtime win-x64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --configuration Release --runtime win-x64 --self-contained false
+          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
           --output artifacts/win-x64
 
       - name: Startup smoke test
