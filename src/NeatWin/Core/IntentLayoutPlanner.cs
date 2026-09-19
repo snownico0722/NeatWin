@@ -41,7 +41,7 @@ internal static partial class IntentLayoutPlanner
                     w.MonitorHandle == group[0].Window.MonitorHandle).ToArray() ?? [];
                 var generationNotes = new List<LayoutCandidateTrace>();
                 var candidates = new List<Candidate> { new("keep", original, order) };
-                var rescue = group.Select(v => Fit(v.Window.VisualRect, v.Window, options)).ToArray();
+                var rescue = group.Select(v => Fit(v.Window.VisualRect, v.Window, options, taskContext.Preferences.AllowUsefulResize)).ToArray();
                 if (!rescue.SequenceEqual(original)) candidates.Add(new("rescue", rescue, order));
                 var local = new TidyEngine().CreatePlan(group, options).ToDictionary(m => m.Window.Handle, m => m.TargetVisualRect);
                 candidates.Add(new("local", group.Select((v, i) => local.GetValueOrDefault(v.Window.Handle, original[i])).ToArray(), order));
@@ -199,12 +199,12 @@ internal static partial class IntentLayoutPlanner
         return false;
     }
 
-    private static RectI Fit(RectI rect, WindowSnapshot window, TidyOptions options)
+    private static RectI Fit(RectI rect, WindowSnapshot window, TidyOptions options, bool allowResize = true)
     {
         if (!options.RescueOffscreenWindows || window.WorkArea.IsEmpty) return rect;
         var area = window.WorkArea;
-        var width = window.IsResizable ? Math.Min(rect.Width, area.Width) : rect.Width;
-        var height = window.IsResizable ? Math.Min(rect.Height, area.Height) : rect.Height;
+        var width = window.IsResizable && allowResize ? Math.Min(rect.Width, area.Width) : rect.Width;
+        var height = window.IsResizable && allowResize ? Math.Min(rect.Height, area.Height) : rect.Height;
         return new RectI(width <= area.Width ? Math.Clamp(rect.Left, area.Left, area.Right - width) : area.Left,
             height <= area.Height ? Math.Clamp(rect.Top, area.Top, area.Bottom - height) : area.Top, width, height);
     }
