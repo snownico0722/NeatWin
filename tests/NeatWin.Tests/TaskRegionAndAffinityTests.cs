@@ -23,7 +23,14 @@ public sealed class TaskRegionAndAffinityTests
             Assert.InRange(current, 0, previous + 1e-9); Assert.InRange(previous - current, 0, .02);
             var x = a with { VisualRect = Scale(a.VisualRect), WorkArea = Scale(Area), Dpi = (uint)dpi };
             var y = b with { VisualRect = Scale(b.VisualRect), WorkArea = Scale(Area), Dpi = (uint)dpi };
-            Assert.InRange(Math.Abs(current - IntentLayoutPlanner.TaskAffinity(x, y, new())), 0, .006);
+            // Scale() rounds to actual pixels. Non-integral gaps are not exactly equivalent.
+            // SmoothStep has maximum derivative 1.5; bound only the measurable gap rounding
+            // error. Exactly representable scenes must still match to numeric precision.
+            var radiusDip = Math.Clamp(Math.Min(Area.Width, Area.Height) * .18, 100, 260);
+            var gapErrorDip = Math.Abs((y.VisualRect.Left - x.VisualRect.Right) / scale - gap);
+            var quantizationBound = 1.5 / (radiusDip * .35) * gapErrorDip;
+            Assert.InRange(Math.Abs(current - IntentLayoutPlanner.TaskAffinity(x, y, new())),
+                0, quantizationBound + 1e-9);
             previous = current;
         }
         Assert.Equal(0, previous);
