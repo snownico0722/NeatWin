@@ -5,7 +5,7 @@ namespace NeatWin.Core;
 public sealed record TaskLayoutProfile(bool AllowUsefulResize = true, bool AllowPeripheralBleed = true,
     double MaximumBleedDip = 24, double JointVisibilityWeight = 1,
     double SpatialContinuityWeight = 1, double ComfortableWidthDip = 1120,
-    double ComfortableHeightDip = 800)
+    double ComfortableHeightDip = 800, bool ProtectWindowEdges = false)
 {
     public TaskLayoutProfile Normalize() => this with
     {
@@ -52,7 +52,7 @@ public sealed record ViewingCalibration(RectI WorkArea, uint Dpi, double WidthMi
 public enum TaskRelation { Automatic, JointView, Alternating, Integrated }
 public sealed record TaskPairHint(nint First, nint Second, TaskRelation Relation);
 public sealed record TaskWindowHint(nint Handle, bool PassiveVisual = false,
-    bool ProtectPeriphery = false, double? UsefulWidthDip = null, double? UsefulHeightDip = null);
+    bool ProtectPeriphery = false, double? UsefulWidthDip = null, double? UsefulHeightDip = null, TaskContentRegion[]? ProtectedRegions = null);
 public sealed record TaskLayoutContext(TaskLayoutProfile? Profile = null, TaskDisplay[]? Displays = null,
     ViewingCalibration? Calibration = null, TaskPairHint[]? PairHints = null,
     TaskWindowHint[]? WindowHints = null, ManualWindowGesture? RecentGesture = null,

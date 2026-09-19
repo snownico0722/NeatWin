@@ -9,6 +9,7 @@ internal static partial class IntentLayoutPlanner
         for (var j = i + 1; j < windows.Length; j++)
         {
             var a = rects[i]; var b = rects[j];
+            var affinity = TaskAffinity(windows[i].Window with { VisualRect = a }, windows[j].Window with { VisualRect = b }, context);
             var hint = context.PairHints?.FirstOrDefault(h =>
                 (h.First == windows[i].Window.Handle && h.Second == windows[j].Window.Handle) ||
                 (h.Second == windows[i].Window.Handle && h.First == windows[j].Window.Handle));
@@ -36,7 +37,7 @@ internal static partial class IntentLayoutPlanner
                 if ((hint.Relation is TaskRelation.JointView or TaskRelation.Integrated) && windows.Length == 2) column = false;
                 uncertainty = 0; source = "explicit-task-hint";
             }
-            evidence.Add(new(i, j, joint, parked, integrated, uncertainty, column, source));
+            evidence.Add(new(i, j, joint * affinity, parked * affinity, integrated, uncertainty, column, source, affinity));
         }
         return evidence.ToArray();
     }
@@ -56,7 +57,7 @@ internal static partial class IntentLayoutPlanner
     private static (int Left, int Right) BleedBudget(WindowSnapshot window, TaskLayoutContext context)
     {
         var profile = context.Preferences;
-        if (!profile.AllowPeripheralBleed || context.WindowHints?.Any(h => h.Handle == window.Handle && h.ProtectPeriphery) == true)
+        if (!profile.AllowPeripheralBleed || profile.ProtectWindowEdges || context.WindowHints?.Any(h => h.Handle == window.Handle && h.ProtectPeriphery) == true)
             return (0, 0);
         var display = context.Displays?.FirstOrDefault(d => d.Monitor == window.MonitorHandle && d.WorkArea == window.WorkArea);
         if (display is null) return (0, 0);
@@ -105,18 +106,27 @@ internal static partial class IntentLayoutPlanner
                  b.Top < area.Top || b.Bottom > area.Bottom))) return false;
             if (window.IsTopmost && b != a) return false;
             if ((!window.IsResizable || !context.Preferences.AllowUsefulResize) && (b.Width != a.Width || b.Height != a.Height)) return false;
-            if (window.IsResizable && (b.Width < Math.Min(a.Width, Math.Min(options.MinimumWidth, area.Width)) ||
-                b.Height < Math.Min(a.Height, Math.Min(options.MinimumHeight, area.Height)))) return false;
-            // Reflow bounds, not inferred willingness to resize by hand.
-            if (a.Width <= area.Width && (b.Width < a.Width * .60 || b.Width > a.Width * 1.50)) return false;
-            if (a.Height <= area.Height && (b.Height < a.Height * .60 || b.Height > a.Height * 1.50)) return false;
+            if (window.IsResizable && (b.Width < Math.Min(a.Width, Math.Min(options.MinimumWidth * window.Dpi / 96.0, area.Width)) ||
+                b.Height < Math.Min(a.Height, Math.Min(options.MinimumHeight * window.Dpi / 96.0, area.Height)))) return false;
+            // A near-maximized draft is not a measured readability requirement. Use the
+            // finite content-scale prior for shrinking large drafts; fixed/native floors remain.
+            var scale = window.Dpi / 96.0;
+            var widthFloor = Math.Min(a.Width, context.Preferences.ComfortableWidthDip * scale) * .60;
+            var heightFloor = Math.Min(a.Height, context.Preferences.ComfortableHeightDip * scale) * .60;
+            if (a.Width <= area.Width && (b.Width < widthFloor || b.Width > a.Width * 1.50)) return false;
+            if (a.Height <= area.Height && (b.Height < heightFloor || b.Height > a.Height * 1.50)) return false;
             var after = ScreenExposure(b, front.Concat((obstacles ?? []).Where(w => w.ZOrder < windows[Array.IndexOf(candidate.Order, i)].Window.ZOrder).Select(w => w.VisualRect)), area, window.Dpi);
             if (after.Visible < Math.Min(.035, previous[i].Visible) - .001) return false;
             var access = Math.Min(96 * window.Dpi / 96.0, previous[i].AccessWidth);
             if (after.AccessWidth + 1 < access && after.UsefulWidth < Math.Min(200 * window.Dpi / 96.0, previous[i].UsefulWidth)) return false;
-            if (context.WindowHints?.Any(h => h.Handle == window.Handle && h.ProtectPeriphery) == true &&
-                after.Visible + .001 < previous[i].Visible) return false;
             front.Add(b);
+        }
+        if (HasRegionProtection(context))
+        {
+            var before = windows.Select((w, i) => w.Window with { VisualRect = original[i] }).Concat(obstacles ?? []).ToArray();
+            var after = candidate.Order.Select((i, rank) => windows[i].Window with
+                { VisualRect = candidate.Rects[i], ZOrder = windows[rank].Window.ZOrder }).Concat(obstacles ?? []).ToArray();
+            if (!DesktopRegionsPreserved(before, after, context)) return false;
         }
         return true;
     }
@@ -152,7 +162,7 @@ internal static partial class IntentLayoutPlanner
             if (windowHint?.UsefulHeightDip is double height && double.IsFinite(height) && height > 0) needHeight = Math.Clamp(height, 120, 3000) * scale;
             var capacity = Math.Pow(Math.Min(1, b.Width / Math.Max(1, needWidth)), .65) *
                 Math.Pow(Math.Min(1, b.Height / Math.Max(1, needHeight)), .35);
-            var contentVisibility = windowHint?.ProtectPeriphery == true ? exposure.Visible :
+            var contentVisibility = (context.Preferences.ProtectWindowEdges || windowHint?.ProtectPeriphery == true) ? exposure.Visible :
                 .65 * exposure.CenterVisible + .35 * exposure.Visible;
             var demand = windows.Length == 1 ? 0 : Math.Max(joint * profile.JointVisibilityWeight,
                 i == 0 ? .85 : .18 * park);
@@ -182,11 +192,11 @@ internal static partial class IntentLayoutPlanner
             var a = candidate.Rects[r.First]; var b = candidate.Rects[r.Second];
             var oa = original[r.First]; var ob = original[r.Second];
             var dx = CenterX(oa) - CenterX(ob); var dy = CenterY(oa) - CenterY(ob);
-            if (Math.Abs(dx) > .20 * Math.Min(oa.Width, ob.Width) && dx * (CenterX(a) - CenterX(b)) < 0) continuity += 1.8;
+            if (Math.Abs(dx) > .20 * Math.Min(oa.Width, ob.Width) && dx * (CenterX(a) - CenterX(b)) < 0) continuity += 1.8 * r.Affinity;
             if (r.SameColumn)
             {
-                continuity += Math.Max(0, Math.Abs(CenterX(a) - CenterX(b)) / Math.Max(1, Math.Min(a.Width, b.Width)) - .30) * 2;
-                if (Math.Abs(dy) > 20 && dy * (CenterY(a) - CenterY(b)) < 0) continuity += 1.2;
+                continuity += Math.Max(0, Math.Abs(CenterX(a) - CenterX(b)) / Math.Max(1, Math.Min(a.Width, b.Width)) - .30) * 2 * r.Affinity;
+                if (Math.Abs(dy) > 20 * windows[r.First].Window.Dpi / 96.0 && dy * (CenterY(a) - CenterY(b)) < 0) continuity += 1.2 * r.Affinity;
             }
             var oldDistance = Math.Sqrt(dx * dx + dy * dy);
             var newDistance = Math.Sqrt(Math.Pow(CenterX(a) - CenterX(b), 2) + Math.Pow(CenterY(a) - CenterY(b), 2));
@@ -199,9 +209,9 @@ internal static partial class IntentLayoutPlanner
             var horizontal = !r.SameColumn && a.VerticalOverlapRatio(b) >= .4;
             if (horizontal)
             {
-                alignment += .13 * Math.Min(1, Math.Min(Math.Abs(a.Top - b.Top), Math.Abs(a.Bottom - b.Bottom)) / Math.Max(1, 80 * windows[r.First].Window.Dpi / 96.0));
+                alignment += .13 * r.Affinity * Math.Min(1, Math.Min(Math.Abs(a.Top - b.Top), Math.Abs(a.Bottom - b.Bottom)) / Math.Max(1, 80 * windows[r.First].Window.Dpi / 96.0));
                 var gap = CenterX(a) < CenterX(b) ? b.Left - a.Right : a.Left - b.Right;
-                if (gap >= 0) alignment += .12 * Math.Min(1, Math.Abs(gap - hint.GapPixels) / 160.0);
+                if (gap >= 0) alignment += .12 * r.Affinity * Math.Min(1, Math.Abs(gap - hint.GapPixels) / (160 * windows[r.First].Window.Dpi / 96.0));
             }
             uncertainty += r.Uncertainty * .04 * Math.Abs(newDistance - oldDistance) / Math.Max(1, Math.Min(area.Width, area.Height));
         }
@@ -234,6 +244,7 @@ internal static partial class IntentLayoutPlanner
         }
         var plannedDesktop = Project(planned.Moves);
         var refinedDesktop = Project(refined);
+        if (!DesktopRegionsPreserved(plannedDesktop, refinedDesktop, context)) return false;
         foreach (var trace in planned.Groups)
         {
             var group = visible.Where(v => trace.Handles.Contains(v.Window.Handle)).OrderBy(v => v.Window.ZOrder).ToArray();
