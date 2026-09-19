@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches:
+      - main
       - agent/**
   pull_request:
 
@@ -49,6 +50,11 @@ jobs:
           --configuration Release --no-restore
           --logger "trx;LogFileName=tests.trx"
           --results-directory TestResults
+
+      - name: Deterministic layout stress
+        run: >-
+          dotnet run --project tools/NeatWin.Stress/NeatWin.Stress.csproj
+          --configuration Release -- 1000
 
       - name: Upload test results
         if: always()

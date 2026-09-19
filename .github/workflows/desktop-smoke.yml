@@ -3,6 +3,7 @@ name: Desktop smoke
 on:
   push:
     branches:
+      - main
       - agent/**
   pull_request:
 

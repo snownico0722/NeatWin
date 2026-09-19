@@ -132,6 +132,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     {
         _taskSession.Invalidate();
         _tidyOptions = eventArgs.Options; _smartBehaviorOptions = eventArgs.BehaviorOptions;
+        if (!_smartBehaviorOptions.PreferReversibleVerticalFill) _verticalFillManager.Track([], false);
         try
         {
             _settingsStore.SaveTidyOptions(_tidyOptions);
@@ -205,7 +206,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
             {
                 var taskContext = _taskSession.Capture(snapshot, _taskPreferences.Profile, Displays(snapshot),
-                    _taskPreferences.Calibration, DateTimeOffset.UtcNow);
+                    _taskPreferences.Calibration, DateTimeOffset.UtcNow) with
+                { PreferReversibleVerticalFill = _smartBehaviorOptions.PreferReversibleVerticalFill };
                 if (videoHint is { Confidence: >= .82 })
                     taskContext = taskContext with { WindowHints = [new(videoHint.WindowHandle, PassiveVisual: true)], VideoHint = videoHint };
                 detailed = IntentLayoutPlanner.CreateDetailedPlan(visibleWorkingSet, _tidyOptions, _referenceStore.Read(), snapshot, taskContext);
@@ -266,24 +268,12 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         { _mainWindow.SetActivity("没有可撤销的整理。"); return; }
         try
         {
-            _taskSession.RejectExplicitly();
             var current = _windowManager.Capture().ToDictionary(w => w.Handle);
-            var reverse = new List<TidyMove>();
-            foreach (var move in _undoPlan)
-                if (current.TryGetValue(move.Window.Handle, out var window) && window.IsManageable &&
-                    window.ProcessId == move.Window.ProcessId && window.MonitorHandle == move.Window.MonitorHandle &&
-                    window.WorkArea == move.Window.WorkArea && SameRect(window.VisualRect, move.TargetVisualRect))
-                    reverse.Add(new TidyMove(window, move.Window.VisualRect));
-            var reverseLayers = _undoLayers.Where(l => WindowLayerSafety.MatchesOrder(l, current.Values.ToArray()) &&
-                l.FrontToBack.All(w => current.TryGetValue(w.Handle, out var now) && now.ProcessId == w.ProcessId &&
-                    SameRect(now.VisualRect, _undoPlan.FirstOrDefault(m => m.Window.Handle == w.Handle)?.TargetVisualRect ?? w.VisualRect)))
-                .Select(l => new WindowLayerOrder(l.FrontToBack.OrderBy(w => w.ZOrder).ToArray())).ToArray();
-            var restorable = reverseLayers.SelectMany(l => l.FrontToBack.Select(w => w.Handle)).ToHashSet();
-            var blocked = _undoLayers.SelectMany(l => l.FrontToBack.Select(w => w.Handle)).Where(h => !restorable.Contains(h)).ToHashSet();
-            // Never perform half an undo when required relative order has changed.
-            reverse.RemoveAll(m => blocked.Contains(m.Window.Handle));
+            var reverse = LayoutUndoPlanner.Create(new(_undoPlan, _undoLayers, []), current.Values.ToArray());
             _autoTidyManager.SuppressFor(650);
-            var application = _windowManager.ApplyLayout(new(reverse, reverseLayers, []));
+            var application = _windowManager.ApplyLayout(reverse);
+            _taskSession.RejectExplicitly(application.Plan.Moves.Select(m => m.Window.Handle)
+                .Concat(application.Plan.Layers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))));
             _journal.Record(current.Values.ToArray(), application.Plan, "undo", application.Notes);
             var skipped = _undoPlan.Count - application.Plan.Moves.Count;
             _undoPlan = []; _undoLayers = [];
@@ -294,6 +284,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
     private static string KindName(string kind) => kind switch
     {
+        "task-vertical-fill" => "可逆纵向填满",
         "task-edge" => "共同观看贴边", "task-fit" => "内容尺度调整", "task-bleed" => "边缘空间交换",
         "task-columns" => "保留列关系重排", "rescue" => "恢复可操作区域",
         "edge-row" => "叠边并排", "stack" => "成组叠放", "restack" => "调整前后层级",

@@ -41,7 +41,7 @@ internal static partial class IntentLayoutPlanner
                     w.MonitorHandle == group[0].Window.MonitorHandle).ToArray() ?? [];
                 var generationNotes = new List<LayoutCandidateTrace>();
                 var candidates = new List<Candidate> { new("keep", original, order) };
-                var rescue = group.Select(v => Fit(v.Window.VisualRect, v.Window, options)).ToArray();
+                var rescue = group.Select(v => Fit(v.Window.VisualRect, v.Window, options, taskContext.Preferences.AllowUsefulResize)).ToArray();
                 if (!rescue.SequenceEqual(original)) candidates.Add(new("rescue", rescue, order));
                 var local = new TidyEngine().CreatePlan(group, options).ToDictionary(m => m.Window.Handle, m => m.TargetVisualRect);
                 candidates.Add(new("local", group.Select((v, i) => local.GetValueOrDefault(v.Window.Handle, original[i])).ToArray(), order));
@@ -56,23 +56,26 @@ internal static partial class IntentLayoutPlanner
                     AddOrders(candidates, "restack", original, group);
                     AddTaskCandidates(candidates, group, original, area, task, taskContext);
                 }
+                AddVerticalFillCandidates(candidates, group, original, taskContext);
                 var stackSignal = StackSignal(group, original);
                 TaskCostBreakdown Breakdown(Candidate c) => TaskCost(group, original, c, task, area, taskContext, hint, obstacles);
-                double Cost(Candidate c) => Breakdown(c).Total;
                 candidates = candidates.DistinctBy(c => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order)).ToList();
-                var best = candidates[0]; var baseline = Cost(best); var bestScore = baseline;
-                var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, Breakdown(best)) };
+                var best = candidates[0]; var baselineBreakdown = Breakdown(best);
+                var baseline = baselineBreakdown.Total; var bestScore = baseline;
+                var beforeExposure = MeasureBeforeExposure(group, original, area, obstacles);
+                var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, baselineBreakdown) };
                 foreach (var candidate in candidates.Skip(1))
                 {
                     var rejection = !candidate.Order.SequenceEqual(order) &&
                         !WindowLayerSafety.CanReorder(group.Select(v => v.Window).ToArray(), desktop ?? all.Select(v => v.Window).ToArray())
-                        ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles) ? "geometry-budget" :
+                        ? "layer-band-or-interleaved-window" : !TaskSafe(group, original, candidate, area, options, taskContext, obstacles, beforeExposure) ? "geometry-budget" :
                         HitsOutsideGroup(settled, group, original, candidate.Rects) ? "other-group" :
                         blockers.Any(w => candidate.Rects.Select((r, i) => r.Intersect(w.VisualRect).Area > original[i].Intersect(w.VisualRect).Area).Any(b => b)) ? "fixed-occluder" :
                         null;
                     if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection)); continue; }
-                    var score = Cost(candidate);
-                    audits.Add(new(candidate.Kind, score, null, Breakdown(candidate)));
+                    var breakdown = Breakdown(candidate);
+                    var score = breakdown.Total;
+                    audits.Add(new(candidate.Kind, score, null, breakdown));
                     var threshold = options.SmartStrength switch
                     {
                         SmartTidyStrength.Gentle => 0.18,
@@ -196,12 +199,12 @@ internal static partial class IntentLayoutPlanner
         return false;
     }
 
-    private static RectI Fit(RectI rect, WindowSnapshot window, TidyOptions options)
+    private static RectI Fit(RectI rect, WindowSnapshot window, TidyOptions options, bool allowResize = true)
     {
         if (!options.RescueOffscreenWindows || window.WorkArea.IsEmpty) return rect;
         var area = window.WorkArea;
-        var width = window.IsResizable ? Math.Min(rect.Width, area.Width) : rect.Width;
-        var height = window.IsResizable ? Math.Min(rect.Height, area.Height) : rect.Height;
+        var width = window.IsResizable && allowResize ? Math.Min(rect.Width, area.Width) : rect.Width;
+        var height = window.IsResizable && allowResize ? Math.Min(rect.Height, area.Height) : rect.Height;
         return new RectI(width <= area.Width ? Math.Clamp(rect.Left, area.Left, area.Right - width) : area.Left,
             height <= area.Height ? Math.Clamp(rect.Top, area.Top, area.Bottom - height) : area.Top, width, height);
     }
