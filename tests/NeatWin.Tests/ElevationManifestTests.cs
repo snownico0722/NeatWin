@@ -9,8 +9,8 @@ public sealed class ElevationManifestTests
     {
         var root = FindRepositoryRoot();
         var text = File.ReadAllText(Path.Combine(root, relativePath));
-        Assert.Contains("requestedExecutionLevel level="requireAdministrator"", text, StringComparison.Ordinal);
-        Assert.Contains("uiAccess="false"", text, StringComparison.Ordinal);
+        Assert.Contains("requestedExecutionLevel level=\"requireAdministrator\"", text, StringComparison.Ordinal);
+        Assert.Contains("uiAccess=\"false\"", text, StringComparison.Ordinal);
     }
 
     [Theory]
