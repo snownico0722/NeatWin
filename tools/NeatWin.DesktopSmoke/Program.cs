@@ -4,6 +4,7 @@ using System.Text.Json;
 using NeatWin.Reference;
 using NeatWin.Core;
 using NeatWin.App;
+using NeatWin.Recording;
 using NeatWin.Windows;
 
 internal static class Program
@@ -129,11 +130,6 @@ internal static class Program
         Until(() => requests.Count == 1, 4000, "Restore did not trigger a workspace update.");
         requests.Clear();
 
-        Require(monitor.SetMode(AutomaticLayoutMode.FullTiling), "Tiling hook setup failed.");
-        Require(PostMessage(window.Handle, 0x8006, 0, 0), "External tiling trigger failed.");
-        Until(() => requests.Count == 1, 4000, "Tiling mode ignored external geometry.");
-        Require(requests[0].Mode == AutomaticLayoutMode.FullTiling, "Wrong automatic tiling route.");
-        requests.Clear();
         Require(monitor.SetMode(AutomaticLayoutMode.Off), "Could not disable automatic layout.");
         Require(!monitor.WatchingWorkspace, "Disabled mode retained workspace hooks.");
         Require(PostMessage(window.Handle, 0x8006, 0, 0), "Disabled-mode child move failed.");
@@ -146,16 +142,24 @@ internal static class Program
         using var form = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
         form.Show(); Pump(100);
         var selector = Descendants(form).OfType<ComboBox>().Single(c => c.AccessibleName == "自动整理档位");
-        Require(selector.Items.Count == 5, "Mode selector does not expose five choices.");
+        Require(selector.Items.Count == 4, "Mode selector does not expose exactly four choices.");
         var changes = 0;
         form.AutoTidyChangeRequested += (_, _) => changes++;
         foreach (var mode in Enum.GetValues<AutomaticLayoutMode>()) selector.SelectedIndex = (int)mode;
-        Require(changes == 4, "Mode selection did not produce exactly the expected changes.");
+        Require(changes == 3, "Mode selection did not produce exactly the expected changes.");
+        var tiling = Descendants(form).OfType<Button>().Single(b => b.Text == "完整平铺");
+        var settingsTab = Descendants(form).OfType<Button>().Single(b => b.Text == "整理设置");
+        Require(tiling.Visible && tiling.PointToScreen(Point.Empty).Y < settingsTab.PointToScreen(Point.Empty).Y, "完整平铺没有作为主页面上方的独立操作。" );
+        var recorderTab = Descendants(form).OfType<Button>().Single(b => b.Text == "记录器");
+        recorderTab.PerformClick(); Pump(80);
+        form.SetRecorderStatus(new RecorderStatus(false, true, 7, 11, 1, null));
+        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "暂停记录"), "内置记录器页缺少暂停控制。" );
+        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "导出记录"), "内置记录器页缺少导出控制。" );
         using var image = new Bitmap(form.Width, form.Height);
         form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size));
         image.Save("automation-mode-ui.png", System.Drawing.Imaging.ImageFormat.Png);
         form.AllowCloseAndClose();
-        Console.WriteLine("PASS: actual WinForms UI exposes and switches all five modes; screenshot retained.");
+        Console.WriteLine("PASS: actual WinForms UI exposes four automation modes, a top-level tiling action and an integrated recorder page; screenshot retained.");
     }
     private static IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>()
         .SelectMany(c => new[] { c }.Concat(Descendants(c)));
