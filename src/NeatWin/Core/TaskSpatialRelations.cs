@@ -16,7 +16,8 @@ internal static partial class IntentLayoutPlanner
         var scale = Math.Max(1, Math.Min(first.Dpi, second.Dpi)) / 96.0;
         var area = first.WorkArea;
         var radius = Math.Clamp(Math.Min(area.Width, area.Height) / scale * .18, 100, 260) * scale;
-        double DistanceWeight(double gap) => 1 - SmoothStep((gap / radius - .65) / .70);
+        // Retain full support inside the established reach; fade only through its outer band.
+        double DistanceWeight(double gap) => 1 - SmoothStep((gap / radius - 1) / .35);
         double AxisWeight(double overlap) => SmoothStep((overlap - .15) / .20);
         return Math.Max(AxisWeight(a.VerticalOverlapRatio(b)) * DistanceWeight(RectI.IntervalGap(a.Left, a.Right, b.Left, b.Right)),
             AxisWeight(a.HorizontalOverlapRatio(b)) * DistanceWeight(RectI.IntervalGap(a.Top, a.Bottom, b.Top, b.Bottom)));
@@ -28,9 +29,10 @@ internal static partial class IntentLayoutPlanner
         return x * x * (3 - 2 * x);
     }
 
-    // The legacy local proposal has pixel-era thresholds. Isolate it behind a DIP adapter
-    // instead of silently changing Classic or maintaining per-DPI sets of learned weights.
-    private static IReadOnlyList<TidyMove> LogicalLocalPlan(VisibleWindow[] group, TidyOptions options)
+    // Solve the local translation constraints exactly, in DIP space. This is one proposal
+    // under the task objective, not the complete Smart algorithm and not a resize prohibition.
+    // Keep Classic and the legacy edge-relaxation implementation unchanged.
+    internal static IReadOnlyList<TidyMove> LogicalLocalPlan(VisibleWindow[] group, TidyOptions options)
     {
         var area = group[0].Window.WorkArea;
         var scale = Math.Max(1, group[0].Window.Dpi) / 96.0;
@@ -42,7 +44,7 @@ internal static partial class IntentLayoutPlanner
               WorkArea = Logical(area), Dpi = 96 } }).ToArray();
         var byHandle = group.ToDictionary(v => v.Window.Handle);
         var oldLogical = normalized.ToDictionary(v => v.Window.Handle, v => v.Window.VisualRect);
-        return new TidyEngine().CreatePlan(normalized, options).Select(m =>
+        return ComfortSmartTidySolver.CreatePlan(normalized, options).Select(m =>
         {
             var w = byHandle[m.Window.Handle].Window;
             var old = oldLogical[w.Handle]; var next = m.TargetVisualRect; var r = w.VisualRect;
