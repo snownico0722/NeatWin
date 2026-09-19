@@ -65,7 +65,7 @@ public sealed record TaskLayoutContext(TaskLayoutProfile? Profile = null, TaskDi
 /// <summary>Bounded session feedback, never satisfaction learning. No disk persistence.</summary>
 public sealed class TaskLayoutSession
 {
-    private string? _pending;
+    private WindowSnapshot[]? _pending;
     private string? _verified;
     private FeedbackGroup[] _pendingGroups = [];
     private readonly Queue<string> _rejected = new();
@@ -90,7 +90,7 @@ public sealed class TaskLayoutSession
     {
         if (plan.Moves.Count == 0 && plan.Layers.Count == 0) return;
         var placed = Project(before, plan);
-        _pending = Fingerprint(placed); _verified = null; _appliedTime = now;
+        _pending = placed; _verified = null; _appliedTime = now;
         var changed = plan.Moves.Where(m => m.TargetVisualRect != m.Window.VisualRect)
             .Select(m => m.Window.Handle).Concat(plan.Layers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))).ToHashSet();
         _pendingGroups = plan.Groups.Where(g => g.Handles.Any(changed.Contains))
@@ -101,7 +101,12 @@ public sealed class TaskLayoutSession
     public void Verify(IReadOnlyList<WindowSnapshot> actual)
     {
         if (_pending is null) return; // A no-op verification must not erase a verified layout.
-        _verified = _pending == Fingerprint(actual) ? _pending : null;
+        // Match the native journal's three-pixel settling tolerance once, then anchor the
+        // exact observed geometry. Later one-pixel user changes still invalidate reuse.
+        var matches = _pending.Length == actual.Count && _pending.All(expected => actual.Any(w =>
+            WindowStateRules.Matches(expected, w, expected.VisualRect) &&
+            w.ZOrder == expected.ZOrder && w.IsForeground == expected.IsForeground));
+        _verified = matches ? Fingerprint(actual) : null;
         _pending = null;
     }
 
@@ -127,7 +132,7 @@ public sealed class TaskLayoutSession
 
     private static string Fingerprint(IEnumerable<WindowSnapshot> windows) => string.Join(";",
         windows.OrderBy(w => w.Handle).Select(w =>
-            $"{w.Handle}:{w.ProcessId}:{w.MonitorHandle}:{w.WorkArea}:{w.Dpi}:{w.VisualRect}:{w.ZOrder}:{w.IsForeground}:{w.IsTopmost}:{w.IsManageable}"));
+            $"{w.Handle}:{w.ProcessId}:{w.MonitorHandle}:{w.WorkArea}:{w.Dpi}:{w.VisualRect}:{w.ZOrder}:{w.IsForeground}:{w.IsTopmost}:{w.IsManageable}:{w.IsResizable}:{w.FrameInsets}"));
 
     private static WindowSnapshot[] Project(IReadOnlyList<WindowSnapshot> before, IntentLayoutPlan plan)
     {
