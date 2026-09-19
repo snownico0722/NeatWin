@@ -1,0 +1,175 @@
+name: Formal Release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: formal-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+
+    steps:
+      - name: Resolve source ref
+        id: source
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            "sha=${{ github.event.pull_request.head.sha }}" >> $env:GITHUB_OUTPUT
+            "kind=pr" >> $env:GITHUB_OUTPUT
+            "pr=${{ github.event.pull_request.number }}" >> $env:GITHUB_OUTPUT
+          } else {
+            "sha=${{ github.sha }}" >> $env:GITHUB_OUTPUT
+            "kind=main" >> $env:GITHUB_OUTPUT
+            "pr=" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Checkout exact release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore tests/NeatWin.Tests/NeatWin.Tests.csproj
+
+      - name: Test
+        run: >-
+          dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj
+          --configuration Release --no-restore
+          --logger "trx;LogFileName=release-tests.trx"
+          --results-directory ReleaseTestResults
+
+      - name: Deterministic layout stress
+        run: >-
+          dotnet run --project tools/NeatWin.Stress/NeatWin.Stress.csproj
+          --configuration Release -- 1000
+
+      - name: Publish main x64
+        run: >-
+          dotnet publish src/NeatWin/NeatWin.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --output release/win-x64
+
+      - name: Publish recorder x64
+        run: >-
+          dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          --output release/win-x64
+
+      - name: Startup smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('NeatWin.exe', 'NeatWin.Recorder.exe')) {
+            $executable = (Resolve-Path "release/win-x64/$name").Path
+            $process = Start-Process -FilePath $executable -PassThru
+            try {
+              if (-not $process.WaitForInputIdle(20000)) { throw "$name did not reach a GUI message loop." }
+              Start-Sleep -Seconds 3
+              $process.Refresh()
+              if ($process.HasExited) { throw "$name exited during startup: $($process.ExitCode)" }
+            } finally {
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                $process.WaitForExit()
+              }
+            }
+          }
+
+      - name: Prepare package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item README.md release/win-x64/README.md
+          New-Item -ItemType Directory -Force release/win-x64/docs | Out-Null
+          Copy-Item docs/*.md release/win-x64/docs/
+          Get-ChildItem release/win-x64/*.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))"
+          } | Set-Content release/win-x64/SHA256SUMS.txt
+          $short = "${{ steps.source.outputs.sha }}".Substring(0, 8)
+          $date = (Get-Date).ToUniversalTime().ToString('yyyy.MM.dd')
+          if ("${{ steps.source.outputs.kind }}" -eq "pr") {
+            $tag = "pr-${{ steps.source.outputs.pr }}-$short"
+            $title = "NeatWin PR #${{ steps.source.outputs.pr }} · $short"
+            $latest = "false"
+            $context = "Pull Request #${{ steps.source.outputs.pr }}"
+          } else {
+            $tag = "v$date.${{ github.run_number }}"
+            $title = "NeatWin $tag"
+            $latest = "true"
+            $context = "main"
+          }
+          Compress-Archive -Path release/win-x64/* -DestinationPath release/NeatWin-win-x64.zip -Force
+          $zipHash = (Get-FileHash release/NeatWin-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $exeHashes = Get-Content release/win-x64/SHA256SUMS.txt
+          $notes = @(
+            "# $title",
+            "",
+            "正式发布包 / Formal release build",
+            "",
+            "- Source: $context",
+            "- Commit: ${{ steps.source.outputs.sha }}",
+            "- Windows: x64",
+            "- Runtime: self-contained .NET 8",
+            "- Tests: unit/regression + deterministic layout stress + GUI startup smoke",
+            "",
+            "## SHA-256",
+            "",
+            "$zipHash  NeatWin-win-x64.zip",
+            "",
+            $exeHashes,
+            "",
+            "PR 构建是正常 GitHub Release，但不会覆盖 Latest；合并进入 main 后会自动再生成 Latest 正式版。"
+          )
+          $notes | Set-Content release/RELEASE_NOTES.md
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "title=$title" >> $env:GITHUB_OUTPUT
+          "latest=$latest" >> $env:GITHUB_OUTPUT
+
+      - name: Publish or refresh GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.package.outputs.tag }}"
+          $title = "${{ steps.package.outputs.title }}"
+          $latest = "${{ steps.package.outputs.latest }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes-file release/RELEASE_NOTES.md --latest=$latest
+            gh release upload $tag release/NeatWin-win-x64.zip release/win-x64/SHA256SUMS.txt --clobber
+          } else {
+            gh release create $tag release/NeatWin-win-x64.zip release/win-x64/SHA256SUMS.txt --target "${{ steps.source.outputs.sha }}" --title $title --notes-file release/RELEASE_NOTES.md --latest=$latest
+          }
+
+      - name: Upload workflow copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeatWin-formal-release-${{ steps.package.outputs.tag }}
+          path: |
+            release/NeatWin-win-x64.zip
+            release/win-x64/SHA256SUMS.txt
+            release/RELEASE_NOTES.md
+          retention-days: 14
