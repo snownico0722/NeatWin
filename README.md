@@ -4,7 +4,7 @@ Windows 浮动窗口整理工具与独立习惯记录器。把粗摆当作意图
 
 ## 使用
 
-发布包中的 `NeatWin.exe` 是主程序，`NeatWin.Recorder.exe` 是只观察、不移动窗口的记录器。两者都是自带 .NET 运行时的 Windows x64 程序。升级前从托盘退出旧程序，再替换两个 EXE；保留在同一目录。无需删除已有记录。
+发布包中的 `NeatWin.exe` 是主程序，`NeatWin.Recorder.exe` 是只观察、不移动窗口的记录器。两者都是 Windows x64 的 framework-dependent 单文件程序，**不再附带 .NET 运行时**。运行前需安装 **Microsoft .NET 10 Desktop Runtime x64**。升级前从托盘退出旧程序，再替换两个 EXE；保留在同一目录。无需删除已有记录。
 
 主窗口标题含“人因任务排布 v3”；记录器继续使用兼容 v2 的记录格式。使用 Smart／均衡并主动点击整理即可，无需开启随手辅助，也无需刻意训练。
 
@@ -49,14 +49,14 @@ Classic 与小范围随手辅助保留。Smart 旧的强制几何填充不再覆
 
 ## 构建与验证
 
-Windows 10 2004 或更新版本／Windows 11，.NET 8 SDK。`global.json` 固定 .NET 8 系列。
+Windows 10 2004 或更新版本／Windows 11。运行正式版需要 **Microsoft .NET 10 Desktop Runtime x64**；源码构建需要 .NET 10 SDK。`global.json` 固定 .NET 10 系列。
 
 ```powershell
 dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj -c Release
 dotnet build src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release
 
-dotnet publish src/NeatWin/NeatWin.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64
-dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/win-x64
+dotnet publish src/NeatWin/NeatWin.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/win-x64
+dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/win-x64
 ```
 
 CI 执行测试、主程序／记录器构建与发布、启动检查，保存 TRX、源码快照和程序包。Desktop smoke 单独检查原生移动生命周期、普通层级调整和恢复。以相应提交的实际结果为准，不把测试存在当成已经通过。
