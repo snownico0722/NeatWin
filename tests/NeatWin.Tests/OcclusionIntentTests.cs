@@ -32,15 +32,20 @@ public sealed class OcclusionIntentTests
     }
 
     [Fact]
-    public void SmallerReferenceCanCoverTheForegroundWindowEdgeWithoutPermanentTopmost()
+    public void PartiallyOccludedBackgroundWindowIsNotPromotedOverForeground()
     {
         var area = new RectI(0, 0, 2200, 1200);
-        var a = W(1, new(0, 80, 1600, 950), area); var b = W(2, new(1240, 160, 800, 850), area);
-        var p = IntentLayoutPlanner.CreateDetailedPlan([V(a), V(b)], new(), desktop: [a, b],
+        var a = W(1, new(0, 80, 1600, 950), area);
+        var b = W(2, new(1240, 160, 800, 850), area);
+        var visible = new[]
+        {
+            new VisibleWindow(a, a.VisualRect.Area, a.VisualRect.Area, 1),
+            new VisibleWindow(b, (long)(b.VisualRect.Area * .42), (long)(b.VisualRect.Area * .42), .42),
+        };
+        var p = IntentLayoutPlanner.CreateDetailedPlan(visible, new(), desktop: [a, b],
             taskContext: new(Profile: new(AllowUsefulResize: false)));
         Assert.Contains(p.Groups.SelectMany(g => g.Candidates), c => c.Kind == "edge-row" && c.Rejection is null);
-        Assert.Contains(p.Layers, l => l.FrontToBack[0].Handle == b.Handle);
-        Assert.All(p.Layers.SelectMany(l => l.FrontToBack), w => Assert.False(w.IsTopmost));
+        Assert.Empty(p.Layers);
         Assert.True(a.IsForeground); Assert.False(b.IsForeground);
     }
 
