@@ -13,7 +13,7 @@ public sealed class AutomationSettingsTests
         try
         {
             var path = Path.Combine(dir, "settings.json");
-            File.WriteAllText(path, "{"AutoTidyEnabled":true,"NeighborSnapDistance":33}");
+            File.WriteAllText(path, "{\"AutoTidyEnabled\":true,\"NeighborSnapDistance\":33}");
             var store = new SettingsStore(path);
             Assert.Equal(AutomaticLayoutMode.LightAssist, store.LoadAutomaticLayoutMode());
             foreach (var mode in Enum.GetValues<AutomaticLayoutMode>())
