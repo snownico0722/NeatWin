@@ -269,22 +269,9 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         try
         {
             var current = _windowManager.Capture().ToDictionary(w => w.Handle);
-            var reverse = new List<TidyMove>();
-            foreach (var move in _undoPlan)
-                if (current.TryGetValue(move.Window.Handle, out var window) && window.IsManageable &&
-                    window.ProcessId == move.Window.ProcessId && window.MonitorHandle == move.Window.MonitorHandle &&
-                    window.WorkArea == move.Window.WorkArea && SameRect(window.VisualRect, move.TargetVisualRect))
-                    reverse.Add(new TidyMove(window, move.Window.VisualRect));
-            var reverseLayers = _undoLayers.Where(l => WindowLayerSafety.MatchesOrder(l, current.Values.ToArray()) &&
-                l.FrontToBack.All(w => current.TryGetValue(w.Handle, out var now) && now.ProcessId == w.ProcessId &&
-                    SameRect(now.VisualRect, _undoPlan.FirstOrDefault(m => m.Window.Handle == w.Handle)?.TargetVisualRect ?? w.VisualRect)))
-                .Select(l => new WindowLayerOrder(l.FrontToBack.OrderBy(w => w.ZOrder).ToArray())).ToArray();
-            var restorable = reverseLayers.SelectMany(l => l.FrontToBack.Select(w => w.Handle)).ToHashSet();
-            var blocked = _undoLayers.SelectMany(l => l.FrontToBack.Select(w => w.Handle)).Where(h => !restorable.Contains(h)).ToHashSet();
-            // Never perform half an undo when required relative order has changed.
-            reverse.RemoveAll(m => blocked.Contains(m.Window.Handle));
+            var reverse = LayoutUndoPlanner.Create(new(_undoPlan, _undoLayers, []), current.Values.ToArray());
             _autoTidyManager.SuppressFor(650);
-            var application = _windowManager.ApplyLayout(new(reverse, reverseLayers, []));
+            var application = _windowManager.ApplyLayout(reverse);
             _taskSession.RejectExplicitly(application.Plan.Moves.Select(m => m.Window.Handle)
                 .Concat(application.Plan.Layers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))));
             _journal.Record(current.Values.ToArray(), application.Plan, "undo", application.Notes);
