@@ -1,4 +1,5 @@
 using NeatWin.Core;
+using NeatWin.Recording;
 
 namespace NeatWin.App;
 
@@ -9,6 +10,7 @@ internal sealed class MainWindow : Form
     private readonly ComboBox _automaticMode;
     private readonly Label _automaticDescription;
     private readonly Button _tidyButton;
+    private readonly Button _fullTilingButton;
     private readonly SegmentedSelector<MainSection> _sectionSelector;
     private Label _hotkeyStatusLabel = null!;
     private CheckBox _ctrlBox = null!;
@@ -18,7 +20,10 @@ internal sealed class MainWindow : Form
     private ComboBox _keyBox = null!;
     private readonly TidyOptionsEditor _tidyOptionsEditor;
     private readonly Control _settingsPage;
+    private readonly Control _recorderPage;
     private readonly Control _hotkeyPage;
+    private Label _recorderStatusLabel = null!;
+    private Button _recorderPauseButton = null!;
     private bool _suppressAutoTidyChange;
     private bool _allowClose;
 
@@ -121,16 +126,30 @@ internal sealed class MainWindow : Form
         header.SetColumnSpan(_automaticDescription, 2);
         root.Controls.Add(header, 0, 0);
 
+        var primaryActions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10),
+            BackColor = UiTheme.Page,
+        };
+        primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
         _tidyButton = new Button
         {
-            Dock = DockStyle.Fill,
-            Text = "整理当前可见窗口",
-            Font = UiTheme.Semibold(12F),
-            Margin = new Padding(0, 0, 0, 10),
+            Dock = DockStyle.Fill, Text = "Smart 整理当前窗口", Font = UiTheme.Semibold(12F),
+            Margin = new Padding(0, 0, 6, 0),
         };
         UiTheme.StylePrimary(_tidyButton);
         _tidyButton.Click += (_, _) => TidyRequested?.Invoke(this, EventArgs.Empty);
-        root.Controls.Add(_tidyButton, 0, 1);
+        primaryActions.Controls.Add(_tidyButton, 0, 0);
+        _fullTilingButton = new Button
+        {
+            Dock = DockStyle.Fill, Text = "完整平铺", Font = UiTheme.Semibold(11F),
+            Margin = new Padding(6, 0, 0, 0),
+        };
+        UiTheme.StyleSecondary(_fullTilingButton);
+        _fullTilingButton.Click += (_, _) => FullTilingRequested?.Invoke(this, EventArgs.Empty);
+        primaryActions.Controls.Add(_fullTilingButton, 1, 0);
+        root.Controls.Add(primaryActions, 0, 1);
 
         _activityLabel = new Label
         {
@@ -145,9 +164,10 @@ internal sealed class MainWindow : Form
 
         _sectionSelector = new SegmentedSelector<MainSection>(
             new SegmentOption<MainSection>(MainSection.Settings, "整理设置"),
+            new SegmentOption<MainSection>(MainSection.Recorder, "记录器"),
             new SegmentOption<MainSection>(MainSection.Hotkey, "快捷键"))
         {
-            Width = 240,
+            Width = 360,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 6),
         };
@@ -166,6 +186,9 @@ internal sealed class MainWindow : Form
             TidyOptionsChangeRequested?.Invoke(this, eventArgs);
         _settingsPage = _tidyOptionsEditor;
         contentHost.Controls.Add(_settingsPage);
+
+        _recorderPage = BuildRecorderPage();
+        contentHost.Controls.Add(_recorderPage);
 
         _hotkeyPage = BuildHotkeyPage(initialBinding);
         contentHost.Controls.Add(_hotkeyPage);
@@ -190,10 +213,6 @@ internal sealed class MainWindow : Form
         UiTheme.StyleSecondary(exitButton);
         exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
         bottom.Controls.Add(exitButton);
-        var recorderButton = new Button { Text = "习惯记录器", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
-        UiTheme.StyleSecondary(recorderButton);
-        recorderButton.Click += (_, _) => RecorderRequested?.Invoke(this, EventArgs.Empty);
-        bottom.Controls.Add(recorderButton);
         var undoButton = new Button { Text = "撤销上次整理", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
         UiTheme.StyleSecondary(undoButton);
         undoButton.Click += (_, _) => UndoRequested?.Invoke(this, EventArgs.Empty);
@@ -210,8 +229,12 @@ internal sealed class MainWindow : Form
     }
 
     internal event EventHandler? TidyRequested;
+    internal event EventHandler? FullTilingRequested;
     internal event EventHandler? UndoRequested;
-    internal event EventHandler? RecorderRequested;
+    internal event EventHandler? RecorderPauseRequested;
+    internal event EventHandler? RecorderOpenDataRequested;
+    internal event EventHandler? RecorderExportRequested;
+    internal event EventHandler? RecorderClearRequested;
     internal event EventHandler<HotkeyChangeEventArgs>? HotkeyChangeRequested;
     internal event EventHandler<TidyOptionsChangeEventArgs>? TidyOptionsChangeRequested;
     internal event EventHandler<AutoTidyChangeEventArgs>? AutoTidyChangeRequested;
@@ -247,7 +270,6 @@ internal sealed class MainWindow : Form
         {
             _automaticMode.SelectedIndex = (int)mode;
             _automaticDescription.Text = AutomaticLayoutPolicy.Description(mode);
-            _tidyButton.Text = mode == AutomaticLayoutMode.FullTiling ? "平铺当前工作区窗口" : "整理当前可见窗口";
         }
         finally
         {
@@ -295,10 +317,79 @@ internal sealed class MainWindow : Form
 
     private void ShowSection(MainSection section)
     {
-        var showSettings = section == MainSection.Settings;
-        _settingsPage.Visible = showSettings;
-        _hotkeyPage.Visible = !showSettings;
-        (showSettings ? _settingsPage : _hotkeyPage).BringToFront();
+        _settingsPage.Visible = section == MainSection.Settings;
+        _recorderPage.Visible = section == MainSection.Recorder;
+        _hotkeyPage.Visible = section == MainSection.Hotkey;
+        (section switch
+        {
+            MainSection.Recorder => _recorderPage,
+            MainSection.Hotkey => _hotkeyPage,
+            _ => _settingsPage,
+        }).BringToFront();
+    }
+
+    internal void ShowRecorderPage()
+    {
+        _sectionSelector.SetValue(MainSection.Recorder, raiseEvent: false);
+        ShowSection(MainSection.Recorder);
+        BringToFrontFromTray();
+    }
+
+    internal void SetRecorderStatus(RecorderStatus status)
+    {
+        _recorderStatusLabel.Text = $"{status.StateText} · 本次 {status.RecordedGestures} 次手势 · " +
+            $"{status.ContextRecords} 次状态变化 · 跳过 {status.Excluded} 条\n" +
+            (status.Error ?? "记录只保存在本机；不保存标题、应用名、按键、截图或鼠标轨迹。不会自动上传。");
+        _recorderStatusLabel.ForeColor = status.Error is null ? UiTheme.TextMuted : UiTheme.Danger;
+        _recorderPauseButton.Text = status.IsPaused ? "继续记录" : "暂停记录";
+        _recorderPauseButton.Enabled = status.IsAvailable;
+    }
+
+    private Control BuildRecorderPage()
+    {
+        var page = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.Page, Padding = new Padding(0, 8, 0, 0) };
+        var card = new ModernCard { Dock = DockStyle.Top, Height = 230 };
+        page.Controls.Add(card);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = UiTheme.Surface, Padding = new Padding(18),
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        card.Controls.Add(layout);
+        layout.Controls.Add(new Label
+        {
+            Text = "内置习惯记录器", AutoSize = true, Font = UiTheme.Semibold(11.5F), ForeColor = UiTheme.Text,
+        }, 0, 0);
+        layout.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted,
+            Text = "NeatWin 运行时自动记录窗口几何、层级、前台和拖动／缩放结果，用于后续分析操作习惯。\n" +
+                   "记录器与整理器共用同一会话标记，可以区分你的操作和 NeatWin 自己的介入。",
+        }, 0, 1);
+        _recorderStatusLabel = new Label { Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted, TextAlign = ContentAlignment.MiddleLeft };
+        layout.Controls.Add(_recorderStatusLabel, 0, 2);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+        _recorderPauseButton = new Button { Text = "暂停记录", AutoSize = true, Padding = new Padding(9, 3, 9, 3) };
+        UiTheme.StyleSecondary(_recorderPauseButton);
+        _recorderPauseButton.Click += (_, _) => RecorderPauseRequested?.Invoke(this, EventArgs.Empty);
+        actions.Controls.Add(_recorderPauseButton);
+        foreach (var (text, action) in new (string, Action)[]
+        {
+            ("打开数据", () => RecorderOpenDataRequested?.Invoke(this, EventArgs.Empty)),
+            ("导出记录", () => RecorderExportRequested?.Invoke(this, EventArgs.Empty)),
+            ("清空记录", () => RecorderClearRequested?.Invoke(this, EventArgs.Empty)),
+        })
+        {
+            var button = new Button { Text = text, AutoSize = true, Padding = new Padding(9, 3, 9, 3), Margin = new Padding(8, 0, 0, 0) };
+            UiTheme.StyleSecondary(button);
+            button.Click += (_, _) => action();
+            actions.Controls.Add(button);
+        }
+        layout.Controls.Add(actions, 0, 3);
+        return page;
     }
 
     private Control BuildHotkeyPage(HotkeyBinding initialBinding)
@@ -491,6 +582,7 @@ internal sealed class MainWindow : Form
     private enum MainSection
     {
         Settings,
+        Recorder,
         Hotkey,
     }
 
