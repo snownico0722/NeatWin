@@ -67,6 +67,7 @@ public sealed class FullTilingTests
     [InlineData(null, false, AutomaticLayoutMode.Off)]
     [InlineData(null, true, AutomaticLayoutMode.LightAssist)]
     [InlineData(3, false, AutomaticLayoutMode.AutoFullAssist)]
+    [InlineData(4, false, AutomaticLayoutMode.AutoFullAssist)]
     [InlineData(0, true, AutomaticLayoutMode.Off)]
     [InlineData(999, true, AutomaticLayoutMode.Off)]
     public void SettingsMigrationDoesNotSilentlyEnableAggressiveAutomation(int? mode, bool old, AutomaticLayoutMode expected) =>

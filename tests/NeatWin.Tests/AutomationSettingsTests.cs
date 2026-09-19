@@ -6,7 +6,7 @@ namespace NeatWin.Tests;
 public sealed class AutomationSettingsTests
 {
     [Fact]
-    public void SettingsSaveAndReloadAllFiveModesWithoutLosingOtherSettings()
+    public void SettingsSaveAndReloadAllFourModesWithoutLosingOtherSettings()
     {
         var dir = Path.Combine(Path.GetTempPath(), "NeatWin-mode-test-" + Guid.NewGuid());
         Directory.CreateDirectory(dir);

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using NeatWin.Reference;
+using NeatWin.Recording;
 using System.Runtime.InteropServices;
 using NeatWin.Core;
 using NeatWin.Windows;
@@ -19,6 +20,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private readonly MainWindow _mainWindow;
     private readonly ReversibleVerticalFillManager _verticalFillManager;
     private readonly AutoTidyManager _autoTidyManager;
+    private readonly RecorderSession _recorder;
     private TidyOptions _tidyOptions;
     private SmartBehaviorOptions _smartBehaviorOptions;
     private readonly IntentReferenceStore _referenceStore = new();
@@ -39,7 +41,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _smartBehaviorOptions = _settingsStore.LoadSmartBehaviorOptions();
         _verticalFillManager = new ReversibleVerticalFillManager();
         _autoTidyManager = new AutoTidyManager();
-        _journal = new LayoutRunJournal(_windowManager, _referenceStore);
+        _recorder = new RecorderSession();
+        _journal = new LayoutRunJournal(_windowManager, _referenceStore, _recorder);
         _workspaceMonitor = new WorkspaceAutoTidyMonitor(_windowManager.Capture,
             () => _tidyRunning || _autoTidyManager.IsGestureActive || NativeWindowActivity.IsMoving);
         _autoTidyManager.GestureStarted += handle =>
@@ -67,7 +70,10 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions, _automaticMode);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
         _mainWindow.UndoRequested += (_, _) => UndoTidy();
-        _mainWindow.RecorderRequested += (_, _) => OpenRecorder();
+        _mainWindow.RecorderPauseRequested += (_, _) => _recorder.TogglePause();
+        _mainWindow.RecorderOpenDataRequested += (_, _) => OpenRecorderData();
+        _mainWindow.RecorderExportRequested += (_, _) => ExportRecorderData();
+        _mainWindow.RecorderClearRequested += (_, _) => ClearRecorderData();
         _mainWindow.HotkeyChangeRequested += OnHotkeyChangeRequested;
         _mainWindow.TidyOptionsChangeRequested += OnTidyOptionsChangeRequested;
         _mainWindow.AutoTidyChangeRequested += OnAutoTidyChangeRequested;
@@ -77,7 +83,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         menu.Items.Add("Open NeatWin", null, (_, _) => _mainWindow.BringToFrontFromTray());
         menu.Items.Add("Tidy visible windows", null, (_, _) => RunTidy());
         menu.Items.Add("撤销上次整理", null, (_, _) => UndoTidy());
-        menu.Items.Add("打开习惯记录器", null, (_, _) => OpenRecorder());
+        menu.Items.Add("打开记录器页", null, (_, _) => _mainWindow.ShowRecorderPage());
         menu.Items.Add("人因排布偏好…", null, (_, _) => EditTaskPreferences());
         var useReference = new ToolStripMenuItem("使用记录器的弱参考") { Checked = _referenceStore.Enabled, CheckOnClick = true };
         useReference.CheckedChanged += (_, _) =>
@@ -104,6 +110,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         AutomationGuard.MarkUtility(_mainWindow.Handle);
         _journal.Completed += OnLayoutVerified;
         _workspaceMonitor.Failed += ex => _mainWindow.SetActivity($"自动整理观察失败：{ex.Message}", error: true);
+        _recorder.StatusChanged += OnRecorderStatusChanged;
+        _mainWindow.SetRecorderStatus(_recorder.Status);
         _mainWindow.Show();
     }
 
@@ -114,6 +122,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             _hotkeyWindow.HotkeyPressed -= RunTidy;
             _autoTidyManager.TidyRequested -= OnFollowHandRequested;
             _hotkeyWindow.Dispose(); _workspaceMonitor.Dispose(); _autoTidyManager.Dispose(); _journal.Dispose();
+            _recorder.StatusChanged -= OnRecorderStatusChanged; _recorder.Dispose();
             _verticalFillManager.Dispose(); _mainWindow.Dispose();
             _trayIcon.Visible = false; _trayIcon.Dispose();
         }
@@ -201,9 +210,8 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     {
         if (request.Mode != _automaticMode) return;
         var route = AutomaticLayoutPolicy.Route(request.Mode, request.Trigger);
-        if (route is not (LayoutRoute.Smart or LayoutRoute.FullTiling)) return;
-        var trigger = route == LayoutRoute.FullTiling ? "automatic-tiling" :
-            request.Trigger == LayoutTrigger.AfterGesture ? "automatic-gesture" : "automatic-workspace";
+        if (route != LayoutRoute.Smart) return;
+        var trigger = request.Trigger == LayoutTrigger.AfterGesture ? "automatic-gesture" : "automatic-workspace";
         RunTidy(showActivity: false, route.Value, trigger);
     }
 
@@ -235,8 +243,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         finally { _tidyRunning = false; }
     }
 
-    private void RunTidy() => RunTidy(showActivity: true,
-        AutomaticLayoutPolicy.Route(_automaticMode, LayoutTrigger.Manual) ?? LayoutRoute.ManualAlgorithm);
+    private void RunTidy() => RunTidy(showActivity: true, LayoutRoute.ManualAlgorithm);
 
     private void RunTidy(bool showActivity, LayoutRoute route = LayoutRoute.ManualAlgorithm, string? source = null)
     {
@@ -355,7 +362,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
     private void OnLayoutVerified(LayoutRunObservation observation)
     {
-        if (observation.Trigger is not ("explicit" or "automatic-gesture" or "automatic-workspace" or "explicit-tiling" or "automatic-tiling") ||
+        if (observation.Trigger is not ("explicit" or "automatic-gesture" or "automatic-workspace" or "explicit-tiling") ||
             observation.Actual is null || observation.Outcome == "intervened") return;
         if (observation.Trigger is "explicit" or "automatic-gesture" or "automatic-workspace")
         {
@@ -396,15 +403,32 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         catch (Exception ex) { _mainWindow.SetActivity($"保存失败：{ex.Message}", error: true); }
     }
 
-    private void OpenRecorder()
+    private void OnRecorderStatusChanged(RecorderStatus status) => _mainWindow.SetRecorderStatus(status);
+
+    private void OpenRecorderData()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "NeatWin.Recorder.exe");
-        try
+        try { _recorder.OpenDataDirectory(); }
+        catch (Exception ex) { _mainWindow.SetActivity($"无法打开记录目录：{ex.Message}", error: true); }
+    }
+
+    private void ExportRecorderData()
+    {
+        using var dialog = new SaveFileDialog
         {
-            if (!File.Exists(path)) throw new FileNotFoundException("请将 NeatWin.Recorder.exe 放在 NeatWin.exe 同一目录。", path);
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-        }
-        catch (Exception ex) { _mainWindow.SetActivity($"无法打开记录器：{ex.Message}", error: true); }
+            FileName = $"NeatWin-window-observations-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+            Filter = "窗口几何记录（ZIP）|*.zip",
+        };
+        if (dialog.ShowDialog(_mainWindow) != DialogResult.OK) return;
+        try { _recorder.ExportRecords(dialog.FileName); _mainWindow.SetActivity("记录已导出。"); }
+        catch (Exception ex) { _mainWindow.SetActivity($"导出失败：{ex.Message}", error: true); }
+    }
+
+    private void ClearRecorderData()
+    {
+        if (MessageBox.Show(_mainWindow, "清空本机窗口记录和弱参考？不会删除 NeatWin 的其他设置。", "清空记录",
+            MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
+        try { _recorder.Clear(); _taskSession.Invalidate(); _mainWindow.SetActivity("记录和弱参考已清空。"); }
+        catch (Exception ex) { _mainWindow.SetActivity($"清空失败：{ex.Message}", error: true); }
     }
 
     private void UpdateTrayText(HotkeyBinding binding)

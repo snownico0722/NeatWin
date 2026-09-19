@@ -1,4 +1,5 @@
 using NeatWin.Core;
+using NeatWin.Recording;
 
 namespace NeatWin.App;
 
@@ -6,7 +7,7 @@ internal sealed class MainWindow : Form
 {
     private readonly Label _activityLabel;
     private readonly SegmentedSelector<TidyAlgorithmMode> _algorithmModeSelector;
-    private readonly ComboBox _automaticMode;
+    private readonly SegmentedSelector<AutomaticLayoutMode> _automaticMode;
     private readonly Label _automaticDescription;
     private readonly Button _tidyButton;
     private readonly SegmentedSelector<MainSection> _sectionSelector;
@@ -18,7 +19,10 @@ internal sealed class MainWindow : Form
     private ComboBox _keyBox = null!;
     private readonly TidyOptionsEditor _tidyOptionsEditor;
     private readonly Control _settingsPage;
+    private readonly Control _recorderPage;
     private readonly Control _hotkeyPage;
+    private Label _recorderStatusLabel = null!;
+    private Button _recorderPauseButton = null!;
     private bool _suppressAutoTidyChange;
     private bool _allowClose;
 
@@ -33,7 +37,9 @@ internal sealed class MainWindow : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = true;
-        ClientSize = new Size(780, 620);
+        ClientSize = new Size(780, 680);
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 9.5F);
         BackColor = UiTheme.Page;
         ForeColor = UiTheme.Text;
@@ -46,7 +52,7 @@ internal sealed class MainWindow : Form
             RowCount = 6,
             BackColor = UiTheme.Page,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
@@ -56,76 +62,53 @@ internal sealed class MainWindow : Form
 
         var header = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 2,
-            BackColor = UiTheme.Page,
-            Margin = new Padding(0),
+            Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3,
+            BackColor = UiTheme.Page, Margin = new Padding(0),
         };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var headerActions = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = new Padding(0),
-            BackColor = UiTheme.Page,
-        };
-
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _algorithmModeSelector = new SegmentedSelector<TidyAlgorithmMode>(
             new SegmentOption<TidyAlgorithmMode>(TidyAlgorithmMode.Smart, "Smart"),
             new SegmentOption<TidyAlgorithmMode>(TidyAlgorithmMode.Classic, "Classic"))
-        {
-            Width = 200,
-            Margin = new Padding(0, 0, 16, 0),
-        };
+        { Width = 200, Anchor = AnchorStyles.Left, Margin = new Padding(0) };
         _algorithmModeSelector.SetValue(initialOptions.AlgorithmMode, raiseEvent: false);
-        headerActions.Controls.Add(_algorithmModeSelector);
+        header.Controls.Add(_algorithmModeSelector, 0, 0);
+        using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+        {
+            var elevated = new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            header.Controls.Add(new Label
+            {
+                Text = elevated ? "管理员运行" : "未提权：管理员窗口可能无法操作",
+                AutoSize = true, Anchor = AnchorStyles.Right,
+                ForeColor = elevated ? UiTheme.TextMuted : UiTheme.Danger,
+            }, 1, 0);
+        }
 
-        var autoHost = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = new Padding(0, 6, 0, 0),
-            BackColor = UiTheme.Page,
-        };
-        autoHost.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = "自动整理",
-            ForeColor = UiTheme.Text,
-            Font = UiTheme.Semibold(9.5F),
-            Margin = new Padding(0, 2, 9, 0),
-        });
-        _automaticMode = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 190, Margin = new Padding(0), AccessibleName = "自动整理档位",
-        };
-        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>()) _automaticMode.Items.Add(AutomaticLayoutPolicy.Name(mode));
-        _automaticMode.SelectedIndex = (int)automaticMode;
-        autoHost.Controls.Add(_automaticMode);
-        headerActions.Controls.Add(autoHost);
-
-        header.Controls.Add(headerActions, 1, 0);
+        // Four choices are visible without opening a menu. "平铺" describes the controls,
+        // not an additional automatic window-tiling policy.
+        _automaticMode = new SegmentedSelector<AutomaticLayoutMode>(
+            Enum.GetValues<AutomaticLayoutMode>().Select(mode =>
+                new SegmentOption<AutomaticLayoutMode>(mode, AutomaticLayoutPolicy.Name(mode))).ToArray())
+        { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 2), AccessibleName = "自动整理档位" };
+        _automaticMode.SetValue(automaticMode, raiseEvent: false);
+        header.Controls.Add(_automaticMode, 0, 1);
+        header.SetColumnSpan(_automaticMode, 2);
         _automaticDescription = new Label
         {
-            Dock = DockStyle.Fill, AutoSize = true, ForeColor = UiTheme.TextMuted,
-            Text = AutomaticLayoutPolicy.Description(automaticMode), Margin = new Padding(0, 4, 0, 6),
+            Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted,
+            Text = AutomaticLayoutPolicy.Description(automaticMode), Margin = new Padding(0, 4, 0, 4),
         };
-        header.Controls.Add(_automaticDescription, 0, 1);
+        header.Controls.Add(_automaticDescription, 0, 2);
         header.SetColumnSpan(_automaticDescription, 2);
         root.Controls.Add(header, 0, 0);
 
         _tidyButton = new Button
         {
-            Dock = DockStyle.Fill,
-            Text = "整理当前可见窗口",
-            Font = UiTheme.Semibold(12F),
+            Dock = DockStyle.Fill, Text = "整理当前可见窗口", Font = UiTheme.Semibold(12F),
             Margin = new Padding(0, 0, 0, 10),
         };
         UiTheme.StylePrimary(_tidyButton);
@@ -145,9 +128,10 @@ internal sealed class MainWindow : Form
 
         _sectionSelector = new SegmentedSelector<MainSection>(
             new SegmentOption<MainSection>(MainSection.Settings, "整理设置"),
+            new SegmentOption<MainSection>(MainSection.Recorder, "记录器"),
             new SegmentOption<MainSection>(MainSection.Hotkey, "快捷键"))
         {
-            Width = 240,
+            Width = 360,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 6),
         };
@@ -166,6 +150,9 @@ internal sealed class MainWindow : Form
             TidyOptionsChangeRequested?.Invoke(this, eventArgs);
         _settingsPage = _tidyOptionsEditor;
         contentHost.Controls.Add(_settingsPage);
+
+        _recorderPage = BuildRecorderPage();
+        contentHost.Controls.Add(_recorderPage);
 
         _hotkeyPage = BuildHotkeyPage(initialBinding);
         contentHost.Controls.Add(_hotkeyPage);
@@ -190,10 +177,6 @@ internal sealed class MainWindow : Form
         UiTheme.StyleSecondary(exitButton);
         exitButton.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
         bottom.Controls.Add(exitButton);
-        var recorderButton = new Button { Text = "习惯记录器", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
-        UiTheme.StyleSecondary(recorderButton);
-        recorderButton.Click += (_, _) => RecorderRequested?.Invoke(this, EventArgs.Empty);
-        bottom.Controls.Add(recorderButton);
         var undoButton = new Button { Text = "撤销上次整理", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
         UiTheme.StyleSecondary(undoButton);
         undoButton.Click += (_, _) => UndoRequested?.Invoke(this, EventArgs.Empty);
@@ -202,7 +185,7 @@ internal sealed class MainWindow : Form
 
         _algorithmModeSelector.ValueChanged += OnAlgorithmModeChanged;
         _sectionSelector.ValueChanged += (_, _) => ShowSection(_sectionSelector.Value);
-        _automaticMode.SelectedIndexChanged += OnAutoTidyChanged;
+        _automaticMode.ValueChanged += OnAutoTidyChanged;
         SetAutomaticLayoutMode(automaticMode);
 
         SetHotkeyControls(initialBinding);
@@ -211,7 +194,10 @@ internal sealed class MainWindow : Form
 
     internal event EventHandler? TidyRequested;
     internal event EventHandler? UndoRequested;
-    internal event EventHandler? RecorderRequested;
+    internal event EventHandler? RecorderPauseRequested;
+    internal event EventHandler? RecorderOpenDataRequested;
+    internal event EventHandler? RecorderExportRequested;
+    internal event EventHandler? RecorderClearRequested;
     internal event EventHandler<HotkeyChangeEventArgs>? HotkeyChangeRequested;
     internal event EventHandler<TidyOptionsChangeEventArgs>? TidyOptionsChangeRequested;
     internal event EventHandler<AutoTidyChangeEventArgs>? AutoTidyChangeRequested;
@@ -245,9 +231,8 @@ internal sealed class MainWindow : Form
         _suppressAutoTidyChange = true;
         try
         {
-            _automaticMode.SelectedIndex = (int)mode;
+            _automaticMode.SetValue(mode, raiseEvent: false);
             _automaticDescription.Text = AutomaticLayoutPolicy.Description(mode);
-            _tidyButton.Text = mode == AutomaticLayoutMode.FullTiling ? "平铺当前工作区窗口" : "整理当前可见窗口";
         }
         finally
         {
@@ -287,18 +272,86 @@ internal sealed class MainWindow : Form
             return;
         }
 
-        if (_automaticMode.SelectedIndex < 0) return;
-        var mode = (AutomaticLayoutMode)_automaticMode.SelectedIndex;
+        var mode = _automaticMode.Value;
         SetAutomaticLayoutMode(mode);
         AutoTidyChangeRequested?.Invoke(this, new AutoTidyChangeEventArgs(mode));
     }
 
     private void ShowSection(MainSection section)
     {
-        var showSettings = section == MainSection.Settings;
-        _settingsPage.Visible = showSettings;
-        _hotkeyPage.Visible = !showSettings;
-        (showSettings ? _settingsPage : _hotkeyPage).BringToFront();
+        _settingsPage.Visible = section == MainSection.Settings;
+        _recorderPage.Visible = section == MainSection.Recorder;
+        _hotkeyPage.Visible = section == MainSection.Hotkey;
+        (section switch
+        {
+            MainSection.Recorder => _recorderPage,
+            MainSection.Hotkey => _hotkeyPage,
+            _ => _settingsPage,
+        }).BringToFront();
+    }
+
+    internal void ShowRecorderPage()
+    {
+        _sectionSelector.SetValue(MainSection.Recorder, raiseEvent: false);
+        ShowSection(MainSection.Recorder);
+        BringToFrontFromTray();
+    }
+
+    internal void SetRecorderStatus(RecorderStatus status)
+    {
+        _recorderStatusLabel.Text = $"{status.StateText} · 本次 {status.RecordedGestures} 次手势 · " +
+            $"{status.ContextRecords} 次状态变化 · 跳过 {status.Excluded} 条\n" +
+            (status.Error ?? "记录只保存在本机；不保存标题、应用名、按键、截图或鼠标轨迹。不会自动上传。");
+        _recorderStatusLabel.ForeColor = status.Error is null ? UiTheme.TextMuted : UiTheme.Danger;
+        _recorderPauseButton.Text = status.IsPaused ? "继续记录" : "暂停记录";
+        _recorderPauseButton.Enabled = status.IsAvailable;
+    }
+
+    private Control BuildRecorderPage()
+    {
+        var page = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.Page, Padding = new Padding(0, 8, 0, 0), AutoScroll = true };
+        var card = new ModernCard { Dock = DockStyle.Top, AutoSize = false, Height = 264 };
+        page.Controls.Add(card);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = UiTheme.Surface, Padding = Padding.Empty,
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        card.Controls.Add(layout);
+        layout.Controls.Add(new Label
+        {
+            Text = "内置习惯记录器", AutoSize = true, Font = UiTheme.Semibold(11.5F), ForeColor = UiTheme.Text,
+        }, 0, 0);
+        layout.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted,
+            Text = "NeatWin 运行时自动记录窗口几何、层级、前台和拖动／缩放结果，用于后续分析操作习惯。\n" +
+                   "观察与整理诊断共用匿名编号。暂停后停止写入新记录；不影响整理功能。",
+        }, 0, 1);
+        _recorderStatusLabel = new Label { Dock = DockStyle.Fill, ForeColor = UiTheme.TextMuted, TextAlign = ContentAlignment.MiddleLeft };
+        layout.Controls.Add(_recorderStatusLabel, 0, 2);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+        _recorderPauseButton = new Button { Text = "暂停记录", AutoSize = true, Padding = new Padding(9, 3, 9, 3) };
+        UiTheme.StyleSecondary(_recorderPauseButton);
+        _recorderPauseButton.Click += (_, _) => RecorderPauseRequested?.Invoke(this, EventArgs.Empty);
+        actions.Controls.Add(_recorderPauseButton);
+        foreach (var (text, action) in new (string, Action)[]
+        {
+            ("打开数据", () => RecorderOpenDataRequested?.Invoke(this, EventArgs.Empty)),
+            ("导出记录", () => RecorderExportRequested?.Invoke(this, EventArgs.Empty)),
+            ("清空记录", () => RecorderClearRequested?.Invoke(this, EventArgs.Empty)),
+        })
+        {
+            var button = new Button { Text = text, AutoSize = true, Padding = new Padding(9, 3, 9, 3), Margin = new Padding(8, 0, 0, 0) };
+            UiTheme.StyleSecondary(button);
+            button.Click += (_, _) => action();
+            actions.Controls.Add(button);
+        }
+        layout.Controls.Add(actions, 0, 3);
+        return page;
     }
 
     private Control BuildHotkeyPage(HotkeyBinding initialBinding)
@@ -491,6 +544,7 @@ internal sealed class MainWindow : Form
     private enum MainSection
     {
         Settings,
+        Recorder,
         Hotkey,
     }
 
