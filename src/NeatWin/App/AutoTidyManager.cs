@@ -66,6 +66,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         // tidy, but pointer polling and the global mouse hook are installed only when needed.
     }
 
+    internal event Action<nint>? GestureStarted;
     internal event Action<ManualWindowGesture>? GestureObserved;
     internal event Action<ManualWindowGesture>? TidyRequested;
 
@@ -206,7 +207,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         uint eventThread,
         uint eventTime)
     {
-        if (_disposed || hwnd == nint.Zero || IsSuppressed)
+        if (_disposed || hwnd == nint.Zero || AutomationGuard.IsUtility(hwnd))
         {
             return;
         }
@@ -265,11 +266,15 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     private void BeginGesture(nint hwnd)
     {
-        if (_disposed || IsSuppressed || !TryGetVisualRect(hwnd, out var rect))
+        if (_disposed || AutomationGuard.IsUtility(hwnd) || !TryGetVisualRect(hwnd, out var rect))
         {
             return;
         }
 
+        // A genuine new drag overrides our own placement cooldown. SetWindowPos does not
+        // start a user move/size loop, and must not hide a quick corrective gesture.
+        Interlocked.Exchange(ref _suppressUntilTick, 0);
+        GestureStarted?.Invoke(hwnd);
         _debounceTimer.Stop();
         _pendingGesture = null;
         var now = Environment.TickCount64;
@@ -293,7 +298,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         var active = _activeGesture;
         _activeGesture = null;
         _dragTimer.Stop();
-        if (_disposed || IsSuppressed || active is null || active.WindowHandle != hwnd ||
+        if (_disposed || active is null || active.WindowHandle != hwnd ||
             !TryGetVisualRect(hwnd, out var endRect))
         {
             return;

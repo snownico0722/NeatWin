@@ -13,8 +13,7 @@ public sealed partial class WindowManager
         var needed = plan.Moves.Select(m => m.Window).Concat(plan.Layers.SelectMany(l => l.FrontToBack))
             .GroupBy(w => w.Handle).Select(g => g.First()).ToArray();
         if (NativeWindowActivity.IsMoving || needed.Any(w => !current.Any(c => c.Handle == w.Handle &&
-            c.ProcessId == w.ProcessId && c.WorkArea == w.WorkArea && c.MonitorHandle == w.MonitorHandle &&
-            c.IsManageable && c.IsTopmost == w.IsTopmost && c.Dpi == w.Dpi && Near(c.VisualRect, w.VisualRect))))
+            c.IsManageable && WindowStateRules.Matches(w, c, w.VisualRect))))
             return new(plan with { Moves = [], Layers = [] }, ["桌面在规划后发生变化，本次未执行。"]);
 
         var notes = ApplyLayers(plan.Layers).ToList();

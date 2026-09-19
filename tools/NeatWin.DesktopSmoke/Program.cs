@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using NeatWin.Reference;
 using NeatWin.Core;
+using NeatWin.App;
 using NeatWin.Windows;
 
 internal static class Program
@@ -71,6 +72,8 @@ internal static class Program
             Require(staleResult.Plan.Moves.Count == 0, "Stale geometry was applied.");
             Console.WriteLine("PASS: stale desktop geometry rejected.");
             Require(SetWindowPos(first.Handle, (nint)(-2), 0, 0, 0, 0, 0x213), "Synthetic topmost cleanup failed.");
+            VerifyAutomaticModes(manager, ids);
+            VerifyModeSelector();
             if (args.Length == 1)
                 VerifyRecorder(args[0], manager.Capture().First(w => w.Handle == windows[0].Handle), children);
             return 0;
@@ -85,6 +88,89 @@ internal static class Program
             }
         }
     }
+    private static void VerifyAutomaticModes(WindowManager manager, HashSet<uint> childIds)
+    {
+        IReadOnlyList<WindowSnapshot> CaptureChildren() => manager.Capture().Where(w => childIds.Contains(w.ProcessId)).ToArray();
+        using var monitor = new WorkspaceAutoTidyMonitor(CaptureChildren, () => NativeWindowActivity.IsMoving);
+        var requests = new List<AutomaticLayoutRequest>();
+        monitor.Requested += requests.Add;
+        var window = CaptureChildren()[0];
+        Require(monitor.SetMode(AutomaticLayoutMode.FullAssist), "Full-assist setup failed.");
+        Require(!monitor.WatchingWorkspace, "Full-assist installed broad workspace hooks.");
+        Require(PostMessage(window.Handle, 0x8006, 0, 0), "External child move failed.");
+        Pump(1000);
+        Require(requests.Count == 0, "Full-assist reacted to an application move without a user gesture.");
+
+        Require(monitor.SetMode(AutomaticLayoutMode.AutoFullAssist), "Automatic Smart hook setup failed.");
+        Require(monitor.WatchingWorkspace, "Automatic mode did not install workspace hooks.");
+        Require(PostMessage(window.Handle, 0x8006, 0, 0), "External child move failed.");
+        Until(() => requests.Count == 1, 4000, "External geometry did not invoke automatic Smart.");
+        Require(requests[0].Trigger == LayoutTrigger.WorkspaceChange, "Wrong external-change source.");
+        requests.Clear(); Pump(1200);
+        Require(requests.Count == 0, "Idle desktop repeatedly invoked Smart.");
+
+        var before = CaptureChildren(); var current = before.First(w => w.Handle == window.Handle);
+        var target = current.VisualRect with { X = current.VisualRect.X + 12 };
+        var plan = new IntentLayoutPlan([new(current, target)], [], []);
+        monitor.ApplicationRequested(before, plan);
+        var applied = manager.ApplyLayout(plan);
+        Require(applied.Plan.Moves.Count == 1, "Synthetic own action was not applied.");
+        Pump(2400);
+        Require(requests.Count == 0, "Our own native placement fed back into automatic Smart.");
+        var actual = CaptureChildren(); var undo = LayoutUndoPlanner.Create(plan, actual);
+        Require(undo.Moves.Count == 1, "Synthetic undo did not match.");
+        monitor.ApplicationRequested(actual, undo); manager.ApplyLayout(undo); Pump(2400);
+        Require(requests.Count == 0, "Undo triggered immediate reapplication.");
+
+        Require(PostMessage(window.Handle, 0x8007, 0, 0), "Synthetic minimize failed.");
+        Until(() => requests.Count == 1, 4000, "Minimize did not trigger a workspace update.");
+        requests.Clear(); Pump(1100);
+        Require(PostMessage(window.Handle, 0x8008, 0, 0), "Synthetic restore failed.");
+        Until(() => requests.Count == 1, 4000, "Restore did not trigger a workspace update.");
+        requests.Clear();
+
+        Require(monitor.SetMode(AutomaticLayoutMode.FullTiling), "Tiling hook setup failed.");
+        Require(PostMessage(window.Handle, 0x8006, 0, 0), "External tiling trigger failed.");
+        Until(() => requests.Count == 1, 4000, "Tiling mode ignored external geometry.");
+        Require(requests[0].Mode == AutomaticLayoutMode.FullTiling, "Wrong automatic tiling route.");
+        requests.Clear();
+        Require(monitor.SetMode(AutomaticLayoutMode.Off), "Could not disable automatic layout.");
+        Require(!monitor.WatchingWorkspace, "Disabled mode retained workspace hooks.");
+        Require(PostMessage(window.Handle, 0x8006, 0, 0), "Disabled-mode child move failed.");
+        Pump(1000); Require(requests.Count == 0, "Disabled mode still requested layout.");
+        Console.WriteLine("PASS: real external move/minimize/restore invoke full auto; own placement and undo do not loop; mode changes disable hooks.");
+    }
+
+    private static void VerifyModeSelector()
+    {
+        using var form = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
+        form.Show(); Pump(100);
+        var selector = Descendants(form).OfType<ComboBox>().Single(c => c.AccessibleName == "自动整理档位");
+        Require(selector.Items.Count == 5, "Mode selector does not expose five choices.");
+        var changes = 0;
+        form.AutoTidyChangeRequested += (_, _) => changes++;
+        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>()) selector.SelectedIndex = (int)mode;
+        Require(changes == 4, "Mode selection did not produce exactly the expected changes.");
+        using var image = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size));
+        image.Save("automation-mode-ui.png", System.Drawing.Imaging.ImageFormat.Png);
+        form.AllowCloseAndClose();
+        Console.WriteLine("PASS: actual WinForms UI exposes and switches all five modes; screenshot retained.");
+    }
+    private static IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>()
+        .SelectMany(c => new[] { c }.Concat(Descendants(c)));
+    private static void Pump(int milliseconds)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < milliseconds) { Application.DoEvents(); Thread.Sleep(15); }
+    }
+    private static void Until(Func<bool> ready, int limit, string error)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!ready() && watch.ElapsedMilliseconds < limit) Pump(30);
+        Require(ready(), error);
+    }
+
     private static void VerifyRecorder(string recorderPath, WindowSnapshot window, List<Process> children)
     {
         var started = DateTimeOffset.UtcNow;
@@ -181,6 +267,9 @@ internal static class Program
     {
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == 0x8006) { Left += 25; return; }
+            if (message.Msg == 0x8007) { WindowState = FormWindowState.Minimized; return; }
+            if (message.Msg == 0x8008) { WindowState = FormWindowState.Normal; return; }
             if (message.Msg == 0x8005)
             {
                 Activate();

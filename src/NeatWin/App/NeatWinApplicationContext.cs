@@ -22,12 +22,14 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
     private TidyOptions _tidyOptions;
     private SmartBehaviorOptions _smartBehaviorOptions;
     private readonly IntentReferenceStore _referenceStore = new();
+    private bool _undoWasSmart;
     private IReadOnlyList<TidyMove> _undoPlan = [];
     private IReadOnlyList<WindowLayerOrder> _undoLayers = [];
     private readonly LayoutRunJournal _journal;
     private readonly TaskLayoutSession _taskSession = new();
     private TaskPreferences _taskPreferences = TaskPreferences.Load();
-    private bool _autoTidyEnabled;
+    private AutomaticLayoutMode _automaticMode;
+    private readonly WorkspaceAutoTidyMonitor _workspaceMonitor;
     private bool _tidyRunning;
 
     public NeatWinApplicationContext()
@@ -38,17 +40,31 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _verticalFillManager = new ReversibleVerticalFillManager();
         _autoTidyManager = new AutoTidyManager();
         _journal = new LayoutRunJournal(_windowManager, _referenceStore);
+        _workspaceMonitor = new WorkspaceAutoTidyMonitor(_windowManager.Capture,
+            () => _tidyRunning || _autoTidyManager.IsGestureActive || NativeWindowActivity.IsMoving);
+        _autoTidyManager.GestureStarted += handle =>
+        {
+            _journal.MarkGesture(handle);
+            _workspaceMonitor.GestureStarted(handle);
+        };
         _autoTidyManager.GestureObserved += gesture =>
         {
             _journal.MarkGesture(gesture.WindowHandle);
             _taskSession.Gesture(gesture, DateTimeOffset.UtcNow);
+            try
+            {
+                if (_windowManager.Capture().Any(w => w.Handle == gesture.WindowHandle && w.IsManageable && !w.IsTopmost))
+                    _workspaceMonitor.GestureCompleted(gesture);
+            }
+            catch (Exception ex) { Trace.TraceWarning($"Gesture snapshot failed: {ex.Message}"); }
         };
-        _autoTidyEnabled = _settingsStore.LoadAutoTidyEnabled() && _autoTidyManager.IsAvailable;
-        _autoTidyManager.Enabled = _autoTidyEnabled;
+        _automaticMode = _settingsStore.LoadAutomaticLayoutMode();
+        if (!ConfigureAutomation(_automaticMode)) _automaticMode = AutomaticLayoutMode.Off;
+        _workspaceMonitor.Requested += OnAutomaticLayoutRequested;
         _autoTidyManager.TidyRequested += OnFollowHandRequested;
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += RunTidy;
-        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions, _autoTidyEnabled);
+        _mainWindow = new MainWindow(requestedHotkey, _tidyOptions, _smartBehaviorOptions, _automaticMode);
         _mainWindow.TidyRequested += (_, _) => RunTidy();
         _mainWindow.UndoRequested += (_, _) => UndoTidy();
         _mainWindow.RecorderRequested += (_, _) => OpenRecorder();
@@ -87,6 +103,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         _mainWindow.HandleCreated += (_, _) => AutomationGuard.MarkUtility(_mainWindow.Handle);
         AutomationGuard.MarkUtility(_mainWindow.Handle);
         _journal.Completed += OnLayoutVerified;
+        _workspaceMonitor.Failed += ex => _mainWindow.SetActivity($"自动整理观察失败：{ex.Message}", error: true);
         _mainWindow.Show();
     }
 
@@ -96,7 +113,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         {
             _hotkeyWindow.HotkeyPressed -= RunTidy;
             _autoTidyManager.TidyRequested -= OnFollowHandRequested;
-            _hotkeyWindow.Dispose(); _autoTidyManager.Dispose(); _journal.Dispose();
+            _hotkeyWindow.Dispose(); _workspaceMonitor.Dispose(); _autoTidyManager.Dispose(); _journal.Dispose();
             _verticalFillManager.Dispose(); _mainWindow.Dispose();
             _trayIcon.Visible = false; _trayIcon.Dispose();
         }
@@ -146,23 +163,53 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         }
     }
 
+    private bool ConfigureAutomation(AutomaticLayoutMode mode, bool arrangeNow = false)
+    {
+        if (mode != AutomaticLayoutMode.Off && !_autoTidyManager.IsAvailable) return false;
+        if (!_workspaceMonitor.SetMode(mode, arrangeNow))
+        {
+            _autoTidyManager.Enabled = false;
+            return false;
+        }
+        // Only the legacy light mode needs pointer sampling; full Smart does not.
+        _autoTidyManager.Enabled = mode == AutomaticLayoutMode.LightAssist;
+        return true;
+    }
+
     private void OnAutoTidyChangeRequested(object? sender, AutoTidyChangeEventArgs eventArgs)
     {
-        if (eventArgs.Enabled && !_autoTidyManager.IsAvailable)
+        try
         {
-            _autoTidyEnabled = false; _autoTidyManager.Enabled = false;
-            _mainWindow.SetAutoTidyEnabled(false);
-            _mainWindow.SetActivity("自动整理监听不可用。", error: true); return;
+            var mode = AutomaticLayoutPolicy.Read((int)eventArgs.Mode, false);
+            if (!ConfigureAutomation(mode, arrangeNow: true))
+            {
+                ConfigureAutomation(AutomaticLayoutMode.Off);
+                _automaticMode = AutomaticLayoutMode.Off;
+                _mainWindow.SetAutomaticLayoutMode(_automaticMode);
+                _mainWindow.SetActivity("自动整理监听不可用，已关闭自动模式；手动整理仍可用。", error: true);
+                return;
+            }
+            _automaticMode = mode;
+            _taskSession.Invalidate();
+            _settingsStore.SaveAutomaticLayoutMode(mode);
+            _mainWindow.SetActivity(AutomaticLayoutPolicy.Description(mode));
         }
-        _autoTidyEnabled = eventArgs.Enabled; _autoTidyManager.Enabled = _autoTidyEnabled;
-        try { _settingsStore.SaveAutoTidyEnabled(_autoTidyEnabled); }
-        catch (Exception exception) { _mainWindow.SetActivity($"自动整理已在本次运行中生效，但保存失败：{exception.Message}", error: true); }
+        catch (Exception exception) { _mainWindow.SetActivity($"自动档位保存失败：{exception.Message}", error: true); }
+    }
+
+    private void OnAutomaticLayoutRequested(AutomaticLayoutRequest request)
+    {
+        if (request.Mode != _automaticMode) return;
+        var route = AutomaticLayoutPolicy.Route(request.Mode, request.Trigger);
+        if (route is not (LayoutRoute.Smart or LayoutRoute.FullTiling)) return;
+        var trigger = route == LayoutRoute.FullTiling ? "automatic-tiling" :
+            request.Trigger == LayoutTrigger.AfterGesture ? "automatic-gesture" : "automatic-workspace";
+        RunTidy(showActivity: false, route.Value, trigger);
     }
 
     private void OnFollowHandRequested(ManualWindowGesture gesture)
     {
-        if (!_autoTidyEnabled || _tidyRunning) return;
-        if (_tidyOptions.AlgorithmMode != TidyAlgorithmMode.Smart) { RunTidy(showActivity: false); return; }
+        if (_automaticMode != AutomaticLayoutMode.LightAssist || _tidyRunning) return;
         _tidyRunning = true;
         try
         {
@@ -180,6 +227,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                     decision.TargetRect.Height != moved.Window.VisualRect.Height))) return;
             _autoTidyManager.SuppressFor(500);
             var assisted = new[] { new TidyMove(moved.Window, decision.TargetRect) };
+            _workspaceMonitor.ApplicationRequested(snapshot, new(assisted, [], []));
             _windowManager.Apply(assisted);
             _journal.Record(snapshot, new(assisted, [], []), "follow-hand", []);
         }
@@ -187,36 +235,46 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         finally { _tidyRunning = false; }
     }
 
-    private void RunTidy() => RunTidy(showActivity: true);
+    private void RunTidy() => RunTidy(showActivity: true,
+        AutomaticLayoutPolicy.Route(_automaticMode, LayoutTrigger.Manual) ?? LayoutRoute.ManualAlgorithm);
 
-    private void RunTidy(bool showActivity)
+    private void RunTidy(bool showActivity, LayoutRoute route = LayoutRoute.ManualAlgorithm, string? source = null)
     {
         if (_tidyRunning || (_autoTidyManager.IsGestureActive || NativeWindowActivity.IsMoving)) return;
         _tidyRunning = true;
         try
         {
+            var tiling = route == LayoutRoute.FullTiling;
+            var effectiveOptions = route == LayoutRoute.Smart ? _tidyOptions with { AlgorithmMode = TidyAlgorithmMode.Smart } : _tidyOptions;
+            var smart = !tiling && effectiveOptions.AlgorithmMode == TidyAlgorithmMode.Smart;
+            var trigger = source ?? (showActivity ? tiling ? "explicit-tiling" : smart ? "explicit" : "explicit-classic" : "classic-follow");
             var snapshot = _windowManager.Capture();
             var visibleWorkingSet = _visibilityAnalyzer.SelectVisibleWorkingSet(snapshot,
-                includeStackAccess: _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart);
+                includeStackAccess: smart);
             VideoBlackBarHint? videoHint = null;
-            if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart && _smartBehaviorOptions.RemoveVideoBlackBars)
+            if (smart && _smartBehaviorOptions.RemoveVideoBlackBars)
                 videoHint = _videoBlackBarDetector.TryDetect(visibleWorkingSet);
             IReadOnlyList<TidyMove> plan;
             IntentLayoutPlan? detailed = null;
-            if (_tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
+            if (tiling)
+            {
+                detailed = LayoutDispatch.Create(route, visibleWorkingSet, effectiveOptions, null, snapshot, null);
+                plan = detailed.Moves;
+            }
+            else if (smart)
             {
                 var taskContext = _taskSession.Capture(snapshot, _taskPreferences.Profile, Displays(snapshot),
                     _taskPreferences.Calibration, DateTimeOffset.UtcNow) with
                 { PreferReversibleVerticalFill = _smartBehaviorOptions.PreferReversibleVerticalFill };
                 if (videoHint is { Confidence: >= .82 })
                     taskContext = taskContext with { WindowHints = [new(videoHint.WindowHandle, PassiveVisual: true)], VideoHint = videoHint };
-                detailed = IntentLayoutPlanner.CreateDetailedPlan(visibleWorkingSet, _tidyOptions, _referenceStore.Read(), snapshot, taskContext);
+                detailed = LayoutDispatch.Create(route, visibleWorkingSet, effectiveOptions, _referenceStore.Read(), snapshot, taskContext);
                 plan = detailed.Moves;
                 // The task objective replaces the old geometry-only fill pass. A video refinement
                 // is retained only when task utility and screen-aware access survive.
                 var beforeVideoPlan = plan;
-                plan = VideoAspectPostProcessor.Refine(visibleWorkingSet, plan, _tidyOptions, _smartBehaviorOptions, videoHint);
-                if (!IntentLayoutPlanner.TaskRefinementAcceptable(visibleWorkingSet, detailed, plan, _tidyOptions, taskContext, snapshot))
+                plan = VideoAspectPostProcessor.Refine(visibleWorkingSet, plan, effectiveOptions, _smartBehaviorOptions, videoHint);
+                if (!IntentLayoutPlanner.TaskRefinementAcceptable(visibleWorkingSet, detailed, plan, effectiveOptions, taskContext, snapshot))
                     plan = detailed.Moves;
                 if (videoHint is not null)
                 {
@@ -229,18 +287,19 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
                     }
                 }
             }
-            else plan = _tidyEngine.CreatePlan(visibleWorkingSet, _tidyOptions);
+            else plan = _tidyEngine.CreatePlan(visibleWorkingSet, effectiveOptions);
 
             detailed = detailed is null ? new(plan, [], []) : detailed with { Moves = plan };
             _autoTidyManager.SuppressFor(650);
+            _workspaceMonitor.ApplicationRequested(snapshot, detailed);
             var application = _windowManager.ApplyLayout(detailed);
             detailed = application.Plan; plan = detailed.Moves;
-            _verticalFillManager.Track(plan, _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart && _smartBehaviorOptions.PreferReversibleVerticalFill);
+            _verticalFillManager.Track(plan, smart && _smartBehaviorOptions.PreferReversibleVerticalFill);
             var layerOrders = detailed.Layers;
-            if (plan.Count > 0 || layerOrders.Count > 0) { _undoPlan = plan; _undoLayers = layerOrders; }
-            if (showActivity && _tidyOptions.AlgorithmMode == TidyAlgorithmMode.Smart)
+            if (plan.Count > 0 || layerOrders.Count > 0) { _undoPlan = plan; _undoLayers = layerOrders; _undoWasSmart = smart; }
+            if (smart)
                 _taskSession.Requested(snapshot, detailed, DateTimeOffset.UtcNow);
-            _journal.Record(snapshot, detailed, showActivity ? "explicit" : "classic-follow", application.Notes);
+            _journal.Record(snapshot, detailed, trigger, application.Notes);
             if (showActivity)
             {
                 var kinds = string.Join("、", detailed.Groups.Select(g => KindName(g.Selected)).Distinct());
@@ -253,7 +312,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
         catch (Exception exception)
         {
             _mainWindow.SetActivity($"整理失败：{exception.Message}", error: true);
-            _trayIcon.ShowBalloonTip(3000, "NeatWin", exception.Message, ToolTipIcon.Error);
+            if (showActivity) _trayIcon.ShowBalloonTip(3000, "NeatWin", exception.Message, ToolTipIcon.Error);
         }
         finally { _tidyRunning = false; }
     }
@@ -271,12 +330,14 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
             var current = _windowManager.Capture().ToDictionary(w => w.Handle);
             var reverse = LayoutUndoPlanner.Create(new(_undoPlan, _undoLayers, []), current.Values.ToArray());
             _autoTidyManager.SuppressFor(650);
+            _workspaceMonitor.ApplicationRequested(current.Values.ToArray(), reverse);
             var application = _windowManager.ApplyLayout(reverse);
-            _taskSession.RejectExplicitly(application.Plan.Moves.Select(m => m.Window.Handle)
-                .Concat(application.Plan.Layers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))));
+            if (_undoWasSmart)
+                _taskSession.RejectExplicitly(application.Plan.Moves.Select(m => m.Window.Handle)
+                    .Concat(application.Plan.Layers.SelectMany(l => l.FrontToBack.Select(w => w.Handle))));
             _journal.Record(current.Values.ToArray(), application.Plan, "undo", application.Notes);
             var skipped = _undoPlan.Count - application.Plan.Moves.Count;
-            _undoPlan = []; _undoLayers = [];
+            _undoPlan = []; _undoLayers = []; _undoWasSmart = false;
             _mainWindow.SetActivity($"已请求还原 {application.Plan.Moves.Count} 个窗口；跳过 {skipped} 个已再次调整、关闭或状态改变的窗口。");
         }
         catch (Exception ex) { _mainWindow.SetActivity($"撤销失败：{ex.Message}", error: true); }
@@ -284,6 +345,7 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
     private static string KindName(string kind) => kind switch
     {
+        "full-tiling" => "完整平铺", "tiling-insufficient-space" => "可平铺空间不足，保留原状",
         "task-vertical-fill" => "可逆纵向填满",
         "task-edge" => "共同观看贴边", "task-fit" => "内容尺度调整", "task-bleed" => "边缘空间交换",
         "task-columns" => "保留列关系重排", "rescue" => "恢复可操作区域",
@@ -293,9 +355,13 @@ internal sealed class NeatWinApplicationContext : ApplicationContext
 
     private void OnLayoutVerified(LayoutRunObservation observation)
     {
-        if (observation.Trigger != "explicit" || observation.Actual is null || observation.Outcome == "intervened") return;
-        if (observation.Outcome == "observed-match") _taskSession.Verify(_windowManager.Capture());
-        else _taskSession.Invalidate();
+        if (observation.Trigger is not ("explicit" or "automatic-gesture" or "automatic-workspace" or "explicit-tiling" or "automatic-tiling") ||
+            observation.Actual is null || observation.Outcome == "intervened") return;
+        if (observation.Trigger is "explicit" or "automatic-gesture" or "automatic-workspace")
+        {
+            if (observation.Outcome == "observed-match") _taskSession.Verify(_windowManager.Capture());
+            else _taskSession.Invalidate();
+        }
         var actual = observation.Actual.Windows;
         var matched = observation.Targets.Count(t => actual.Any(w => w.Id == t.Id && SameRect(w.Rect, t.Target)));
         var description = string.Join("、", observation.Groups.Select(g => KindName(g.Selected)).Distinct());
