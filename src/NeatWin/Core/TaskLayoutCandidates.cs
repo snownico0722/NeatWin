@@ -3,7 +3,7 @@ namespace NeatWin.Core;
 internal static partial class IntentLayoutPlanner
 {
     private static void AddTaskCandidates(List<Candidate> candidates, VisibleWindow[] windows,
-        RectI[] original, RectI area, TaskEvidence[] relations, TaskLayoutContext context)
+        RectI[] original, RectI area, TaskEvidence[] relations, TaskLayoutContext context, int gap)
     {
         if (windows.Length is < 2 or > 8) return;
         var profile = context.Preferences;
@@ -53,7 +53,7 @@ internal static partial class IntentLayoutPlanner
                 var ba = bleed ? BleedBudget(windows[left].Window, context).Left : 0;
                 var bb = bleed ? BleedBudget(windows[right].Window, context).Right : 0;
                 if (bleed && ba == 0 && bb == 0) return;
-                var span = edgeAnchor ? area.Width : Math.Min(area.Width, aw + bw + 8);
+                var span = edgeAnchor ? area.Width : Math.Min(area.Width, aw + bw + gap);
                 var x = edgeAnchor ? area.Left : Math.Clamp((int)Math.Round(CenterX(Bounds(original)) - span / 2.0), area.Left, area.Right - span);
                 var top = Math.Clamp((int)Math.Round((a.Top + b.Top) / 2.0), area.Top, area.Bottom - Math.Max(ah, bh));
                 var targets = original.ToArray();
@@ -74,7 +74,7 @@ internal static partial class IntentLayoutPlanner
         if (columns.Count > 1 && columns.Count < windows.Length)
         {
             var widthSum = columns.Sum(c => c.Max(i => original[i].Width));
-            var ratio = Math.Min(1, (area.Width - (columns.Count - 1) * 8) / (double)widthSum);
+            var ratio = Math.Min(1, (area.Width - (columns.Count - 1) * gap) / (double)widthSum);
             if (ratio < .60) return;
             var target = original.ToArray();
             var x = area.Left;
@@ -86,10 +86,10 @@ internal static partial class IntentLayoutPlanner
                 foreach (var i in column)
                 {
                     var r = original[i];
-                    var width = windows[i].Window.IsResizable && profile.AllowUsefulResize ? (int)Math.Round(r.Width * ratio) : r.Width;
+                    var width = windows[i].Window.IsResizable && profile.AllowUsefulResize ? (int)Math.Floor(r.Width * ratio) : r.Width;
                     target[i] = new(x, top + r.Top - minTop, width, r.Height);
                 }
-                x += column.Max(i => target[i].Width) + 8;
+                x += column.Max(i => target[i].Width) + gap;
             }
             AddOrders(candidates, "task-columns", target, windows);
         }

@@ -28,8 +28,8 @@ internal static partial class IntentLayoutPlanner
             var area = all[0].Window.WorkArea;
             if (area.IsEmpty) continue;
             var settled = all.ToDictionary(v => v.Window.Handle, v => v.Window.VisualRect);
-            var reach = Math.Clamp(Math.Min(area.Width, area.Height) * 0.18, 100, 260);
-            foreach (var group in Groups(all, reach))
+            var settledRanks = all.ToDictionary(v => v.Window.Handle, v => v.Window.ZOrder);
+            foreach (var group in Groups(all, taskContext))
             {
                 var hint = IntentEvidence.Resolve(reference, area, group[0].Window.Dpi, DateTimeOffset.UtcNow);
                 var original = group.Select(v => v.Window.VisualRect).ToArray();
@@ -38,12 +38,14 @@ internal static partial class IntentLayoutPlanner
                 var blockers = desktop?.Where(w => !all.Any(v => v.Window.Handle == w.Handle) &&
                     w.MonitorHandle == group[0].Window.MonitorHandle && w.ZOrder < group.Max(v => v.Window.ZOrder)).ToArray() ?? [];
                 var obstacles = desktop?.Where(w => !group.Any(v => v.Window.Handle == w.Handle) &&
-                    w.MonitorHandle == group[0].Window.MonitorHandle).ToArray() ?? [];
+                    w.MonitorHandle == group[0].Window.MonitorHandle).Select(w => w with
+                    { VisualRect = settled.GetValueOrDefault(w.Handle, w.VisualRect),
+                      ZOrder = settledRanks.GetValueOrDefault(w.Handle, w.ZOrder) }).ToArray() ?? [];
                 var generationNotes = new List<LayoutCandidateTrace>();
                 var candidates = new List<Candidate> { new("keep", original, order) };
                 var rescue = group.Select(v => Fit(v.Window.VisualRect, v.Window, options, taskContext.Preferences.AllowUsefulResize)).ToArray();
                 if (!rescue.SequenceEqual(original)) candidates.Add(new("rescue", rescue, order));
-                var local = new TidyEngine().CreatePlan(group, options).ToDictionary(m => m.Window.Handle, m => m.TargetVisualRect);
+                var local = LogicalLocalPlan(group, options).ToDictionary(m => m.Window.Handle, m => m.TargetVisualRect);
                 candidates.Add(new("local", group.Select((v, i) => local.GetValueOrDefault(v.Window.Handle, original[i])).ToArray(), order));
                 if (group.Length is >= 2 and <= 12)
                 {
@@ -54,7 +56,7 @@ internal static partial class IntentLayoutPlanner
                         AddPackedCandidate("grid", columns, false);
                     AddOverlapping(candidates, group, original, area, hint);
                     AddOrders(candidates, "restack", original, group);
-                    AddTaskCandidates(candidates, group, original, area, task, taskContext);
+                    AddTaskCandidates(candidates, group, original, area, task, taskContext, hint.GapPixels);
                 }
                 AddVerticalFillCandidates(candidates, group, original, taskContext);
                 var stackSignal = StackSignal(group, original);
@@ -64,7 +66,31 @@ internal static partial class IntentLayoutPlanner
                 var baseline = baselineBreakdown.Total; var bestScore = baseline;
                 var beforeExposure = MeasureBeforeExposure(group, original, area, obstacles);
                 var audits = new List<LayoutCandidateTrace>(generationNotes) { new("keep", baseline, null, baselineBreakdown) };
-                foreach (var candidate in candidates.Skip(1))
+                var seen = candidates.Select(CandidateKey).ToHashSet();
+                foreach (var candidate in candidates.Skip(1)) Evaluate(candidate, 0);
+                // Finish useful geometry in this call, but freeze task evidence, content demand,
+                // safety floors and movement origin. Never learn or re-infer from our own output.
+                // This is bounded candidate lookahead, not repeated native window application.
+                if (group.Length is >= 2 and <= 8)
+                for (var generation = 1; generation <= 2 && best.Kind != "keep"; generation++)
+                {
+                    var seed = best;
+                    var completion = new List<Candidate>();
+                    for (var columns = 1; columns <= group.Length; columns++)
+                    {
+                        var packed = new List<RectI[]>();
+                        AddPacked(packed, group, seed.Rects, area, hint.GapPixels, columns, false);
+                        var kind = columns == 1 ? "rows" : columns == group.Length ? "columns" : "grid";
+                        foreach (var rects in packed) AddOrders(completion, kind, rects, group);
+                    }
+                    AddTaskCandidates(completion, group, seed.Rects, area, task, taskContext, hint.GapPixels);
+                    AddOverlapping(completion, group, seed.Rects, area, hint);
+                    foreach (var proposal in completion)
+                        if (seen.Add(CandidateKey(proposal))) Evaluate(proposal, generation);
+                    if (ReferenceEquals(seed, best)) break;
+                }
+
+                void Evaluate(Candidate candidate, int generation)
                 {
                     var rejection = !candidate.Order.SequenceEqual(order) &&
                         !WindowLayerSafety.CanReorder(group.Select(v => v.Window).ToArray(), desktop ?? all.Select(v => v.Window).ToArray())
@@ -72,10 +98,10 @@ internal static partial class IntentLayoutPlanner
                         HitsOutsideGroup(settled, group, original, candidate.Rects) ? "other-group" :
                         blockers.Any(w => candidate.Rects.Select((r, i) => r.Intersect(w.VisualRect).Area > original[i].Intersect(w.VisualRect).Area).Any(b => b)) ? "fixed-occluder" :
                         null;
-                    if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection)); continue; }
+                    if (rejection is not null) { audits.Add(new(candidate.Kind, null, rejection, Generation: generation)); return; }
                     var breakdown = Breakdown(candidate);
                     var score = breakdown.Total;
-                    audits.Add(new(candidate.Kind, score, null, breakdown));
+                    audits.Add(new(candidate.Kind, score, null, breakdown, generation));
                     var threshold = options.SmartStrength switch
                     {
                         SmartTidyStrength.Gentle => 0.18,
@@ -87,9 +113,11 @@ internal static partial class IntentLayoutPlanner
                     if ((score < bestScore && score < baseline - threshold) || (best.Kind == "keep" && needsRescue && candidate.Kind == "rescue"))
                     { best = candidate; bestScore = score; }
                 }
+
                 for (var i = 0; i < group.Length; i++)
                 {
                     settled[group[i].Window.Handle] = best.Rects[i];
+                    settledRanks[group[best.Order[i]].Window.Handle] = group[i].Window.ZOrder;
                     if (best.Rects[i] != group[i].Window.VisualRect) moves.Add(new(group[i].Window, best.Rects[i]));
                 }
                 if (!best.Order.SequenceEqual(order)) layers.Add(new(best.Order.Select(i => group[i].Window).ToArray()));
@@ -109,7 +137,9 @@ internal static partial class IntentLayoutPlanner
         return new(moves, layers, traces);
     }
 
-    private static IEnumerable<VisibleWindow[]> Groups(VisibleWindow[] windows, double reach)
+    private static string CandidateKey(Candidate c) => string.Join(";", c.Rects) + ":" + string.Join(",", c.Order);
+
+    private static IEnumerable<VisibleWindow[]> Groups(VisibleWindow[] windows, TaskLayoutContext context)
     {
         var remaining = new HashSet<int>(Enumerable.Range(0, windows.Length));
         while (remaining.Count != 0)
@@ -118,7 +148,7 @@ internal static partial class IntentLayoutPlanner
             remaining.Remove(indices[0]);
             for (var i = 0; i < indices.Count; i++)
                 foreach (var j in remaining.ToArray())
-                    if (Related(windows[indices[i]].Window.VisualRect, windows[j].Window.VisualRect, reach))
+                    if (TaskAffinity(windows[indices[i]].Window, windows[j].Window, context) > 0)
                     {
                         indices.Add(j);
                         remaining.Remove(j);
@@ -126,11 +156,6 @@ internal static partial class IntentLayoutPlanner
             yield return indices.Order().Select(i => windows[i]).ToArray();
         }
     }
-
-    private static bool Related(RectI a, RectI b, double reach) =>
-        a.Intersect(b).Area > 0 ||
-        (a.VerticalOverlapRatio(b) >= 0.3 && RectI.IntervalGap(a.Left, a.Right, b.Left, b.Right) <= reach) ||
-        (a.HorizontalOverlapRatio(b) >= 0.3 && RectI.IntervalGap(a.Top, a.Bottom, b.Top, b.Bottom) <= reach);
 
     private static void AddPacked(List<RectI[]> candidates, VisibleWindow[] windows, RectI[] original,
         RectI area, int gap, int columns, bool equalize)

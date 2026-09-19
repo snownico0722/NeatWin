@@ -33,6 +33,7 @@ internal sealed class TaskPreferencesDialog : Form
 {
     private readonly CheckBox _resize = new() { Text = "允许为更好的使用效果调整大小", AutoSize = true };
     private readonly CheckBox _bleed = new() { Text = "允许少量水平出屏（外侧边缘可牺牲）", AutoSize = true };
+    private readonly CheckBox _protect = new() { Text = "保护四侧边缘（不以一侧新增遮挡换取总面积）", AutoSize = true };
     private readonly CheckBox _physical = new() { Text = "为此工作区提供物理观看参数", AutoSize = true };
     private readonly NumericUpDown _bleedSize = Number(0, 48);
     private readonly NumericUpDown _width = Number(480, 2400);
@@ -47,13 +48,13 @@ internal sealed class TaskPreferencesDialog : Form
     {
         AllowUsefulResize = _resize.Checked, AllowPeripheralBleed = _bleed.Checked,
         MaximumBleedDip = (double)_bleedSize.Value, ComfortableWidthDip = (double)_width.Value,
-        ComfortableHeightDip = (double)_height.Value,
+        ComfortableHeightDip = (double)_height.Value, ProtectWindowEdges = _protect.Checked,
     }, _physical.Checked ? new(_area, _dpi, (double)_physicalWidth.Value, (double)_distance.Value) : null);
 
     internal TaskPreferencesDialog(TaskPreferences preferences, RectI area, uint dpi)
     {
         _initial = preferences; _area = area; _dpi = dpi;
-        Text = "人因排布偏好"; ClientSize = new Size(660, 510); MinimumSize = new Size(620, 500);
+        Text = "人因排布偏好"; ClientSize = new Size(660, 550); MinimumSize = new Size(620, 500);
         StartPosition = FormStartPosition.CenterParent; Font = new Font("Microsoft YaHei UI", 9.5F);
         AutoScaleMode = AutoScaleMode.Dpi;
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 2, AutoScroll = true };
@@ -72,6 +73,7 @@ internal sealed class TaskPreferencesDialog : Form
         Add(Label("自动判断窗口关系；这些是偏好，不是必须选择的工作模式。中心区域只是几何先验，并不保证边缘信息不重要。"));
         _resize.Checked = preferences.Profile.AllowUsefulResize; Add(_resize);
         _bleed.Checked = preferences.Profile.AllowPeripheralBleed; Add(_bleed);
+        _protect.Checked = preferences.Profile.ProtectWindowEdges; Add(_protect);
         _bleedSize.Value = (decimal)preferences.Profile.MaximumBleedDip; Add(Label("最大水平出屏量（DIP）"), _bleedSize);
         _width.Value = (decimal)preferences.Profile.ComfortableWidthDip; Add(Label("共同观看的参考信息宽度（DIP；不是固定窗口宽度）"), _width);
         _height.Value = (decimal)preferences.Profile.ComfortableHeightDip; Add(Label("共同观看的参考信息高度（DIP）"), _height);
@@ -81,7 +83,8 @@ internal sealed class TaskPreferencesDialog : Form
         Add(Label("当前可用工作区实际宽度（毫米，不是对角线）"), _physicalWidth);
         Add(Label("眼睛到屏幕中心的距离（毫米）"), _distance);
         Add(Label($"对应工作区：{area.Width} × {area.Height}，DPI {dpi}。\n不填写时使用归一化距离；不是眼动追踪。曲面屏的角度仅为平面近似。"));
-        void EnableInputs() { _physicalWidth.Enabled = _distance.Enabled = _physical.Checked; _bleedSize.Enabled = _bleed.Checked; }
+        void EnableInputs() { _physicalWidth.Enabled = _distance.Enabled = _physical.Checked; _bleed.Enabled = !_protect.Checked; _bleedSize.Enabled = _bleed.Checked && !_protect.Checked; }
+        _protect.CheckedChanged += (_, _) => EnableInputs();
         _physical.CheckedChanged += (_, _) => EnableInputs(); _bleed.CheckedChanged += (_, _) => EnableInputs(); EnableInputs();
         var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill };
         var save = new Button { Text = "保存", DialogResult = DialogResult.OK, AutoSize = true };
