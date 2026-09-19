@@ -19,14 +19,13 @@ public sealed class AutomaticLayoutTests
     [InlineData(1, 1, LayoutRoute.LightAssist)] [InlineData(1, 2, null)]
     [InlineData(2, 1, LayoutRoute.Smart)] [InlineData(2, 2, null)]
     [InlineData(3, 1, LayoutRoute.Smart)] [InlineData(3, 2, LayoutRoute.Smart)]
-    [InlineData(4, 1, LayoutRoute.FullTiling)] [InlineData(4, 2, LayoutRoute.FullTiling)]
-    public void FiveModesHaveDistinctTriggerContracts(int mode, int trigger, LayoutRoute? route) =>
+    public void FourModesHaveDistinctTriggerContracts(int mode, int trigger, LayoutRoute? route) =>
         Assert.Equal(route, AutomaticLayoutPolicy.Route((AutomaticLayoutMode)mode, (LayoutTrigger)trigger));
 
     [Theory]
-    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)]
     public void ManualButtonIsAlwaysAvailable(int mode) =>
-        Assert.Equal(mode == 4 ? LayoutRoute.FullTiling : LayoutRoute.ManualAlgorithm,
+        Assert.Equal(LayoutRoute.ManualAlgorithm,
             AutomaticLayoutPolicy.Route((AutomaticLayoutMode)mode, LayoutTrigger.Manual));
 
     [Fact]
