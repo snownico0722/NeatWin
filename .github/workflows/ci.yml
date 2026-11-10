@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - agent/**
+    branches: [main, 'agent/**']
   pull_request:
 
 permissions:
@@ -17,45 +15,34 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Archive source snapshot
         shell: pwsh
         run: git archive --format=zip --output=NeatWin-source.zip HEAD
-
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
           name: NeatWin-source
           path: NeatWin-source.zip
           retention-days: 14
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-
       - name: Restore
         run: dotnet restore tests/NeatWin.Tests/NeatWin.Tests.csproj
-
-      - name: Build standalone recorder
-        run: dotnet build src/NeatWin.Recorder/NeatWin.Recorder.csproj --configuration Release
-
       - name: Test
         run: >-
           dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj
           --configuration Release --no-restore
           --logger "trx;LogFileName=tests.trx"
           --results-directory TestResults
-
       - name: Deterministic layout stress
         run: >-
           dotnet run --project tools/NeatWin.Stress/NeatWin.Stress.csproj
           --configuration Release -- 1000
-
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,58 +51,52 @@ jobs:
           path: TestResults/
           if-no-files-found: warn
           retention-days: 14
-
       - name: Publish offline geometry replay (Linux x64)
         run: >-
           dotnet publish tools/NeatWin.Replay/NeatWin.Replay.csproj
           --configuration Release --runtime linux-x64 --self-contained true
           -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
           --output artifacts/replay-linux
-
       - name: Upload offline replay
         uses: actions/upload-artifact@v4
         with:
           name: NeatWin-replay-linux-x64
           path: artifacts/replay-linux/
           retention-days: 14
-
       - name: Publish main x64
         run: >-
           dotnet publish src/NeatWin/NeatWin.csproj
           --configuration Release --runtime win-x64 --self-contained false
           -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
           --output artifacts/win-x64
-
-      - name: Publish recorder x64
-        run: >-
-          dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj
-          --configuration Release --runtime win-x64 --self-contained false
-          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
-          --output artifacts/win-x64
-
+      - name: Render real WPF views in both themes
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'artifacts/win-x64/NeatWin.exe').Path
+          $process = Start-Process $exe -ArgumentList '--ui-smoke', 'artifacts/ui-smoke' -PassThru
+          if (-not $process.WaitForExit(30000)) { Stop-Process -Id $process.Id -Force; throw 'WPF smoke timed out' }
+          if ($process.ExitCode -ne 0) { throw "WPF smoke failed: $($process.ExitCode)" }
+          if (-not (Test-Path artifacts/ui-smoke/light.png)) { throw 'Missing WPF screenshot' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NeatWin-ui-smoke
+          path: artifacts/ui-smoke/
+          if-no-files-found: warn
       - name: Startup smoke test
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($name in @('NeatWin.exe', 'NeatWin.Recorder.exe')) {
-            $executable = (Resolve-Path "artifacts/win-x64/$name").Path
-            $process = Start-Process -FilePath $executable -PassThru
-            try {
-              if (-not $process.WaitForInputIdle(20000)) {
-                throw "$name did not reach a GUI message loop."
-              }
-              Start-Sleep -Seconds 3
-              $process.Refresh()
-              if ($process.HasExited) { throw "$name exited during startup: $($process.ExitCode)" }
-              Write-Output "$name reached the GUI message loop and remained running."
-            } finally {
-              if (-not $process.HasExited) {
-                Stop-Process -Id $process.Id -Force
-                $process.WaitForExit()
-              }
-            }
+          $executable = (Resolve-Path 'artifacts/win-x64/NeatWin.exe').Path
+          $process = Start-Process -FilePath $executable -PassThru
+          try {
+            if (-not $process.WaitForInputIdle(20000)) { throw 'NeatWin did not reach a GUI message loop.' }
+            Start-Sleep -Seconds 3
+            $process.Refresh()
+            if ($process.HasExited) { throw "NeatWin exited during startup: $($process.ExitCode)" }
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
           }
-
       - name: Package usage and checksums
         shell: pwsh
         run: |
@@ -125,7 +106,6 @@ jobs:
           Get-ChildItem artifacts/win-x64/*.exe | Get-FileHash -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content artifacts/win-x64/SHA256SUMS.txt
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

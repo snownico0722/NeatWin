@@ -50,52 +50,35 @@ jobs:
     needs: detect-merged-pr
     if: needs.detect-merged-pr.outputs.release == 'true'
     runs-on: windows-latest
-
     steps:
       - name: Checkout tested main commit
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.detect-merged-pr.outputs.sha }}
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-
       - name: Publish main x64
         run: >-
           dotnet publish src/NeatWin/NeatWin.csproj
           --configuration Release --runtime win-x64 --self-contained false
           -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
           --output release/win-x64
-
-      - name: Publish recorder x64
-        run: >-
-          dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj
-          --configuration Release --runtime win-x64 --self-contained false
-          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
-          --output release/win-x64
-
       - name: Package startup smoke
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($name in @('NeatWin.exe', 'NeatWin.Recorder.exe')) {
-            $executable = (Resolve-Path "release/win-x64/$name").Path
-            $process = Start-Process -FilePath $executable -PassThru
-            try {
-              if (-not $process.WaitForInputIdle(20000)) { throw "$name did not reach a GUI message loop." }
-              Start-Sleep -Seconds 3
-              $process.Refresh()
-              if ($process.HasExited) { throw "$name exited during startup: $($process.ExitCode)" }
-            } finally {
-              if (-not $process.HasExited) {
-                Stop-Process -Id $process.Id -Force
-                $process.WaitForExit()
-              }
-            }
+          $executable = (Resolve-Path 'release/win-x64/NeatWin.exe').Path
+          $process = Start-Process -FilePath $executable -PassThru
+          try {
+            if (-not $process.WaitForInputIdle(20000)) { throw 'NeatWin did not reach a GUI message loop.' }
+            Start-Sleep -Seconds 3
+            $process.Refresh()
+            if ($process.HasExited) { throw "NeatWin exited during startup: $($process.ExitCode)" }
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
           }
-
       - name: Prepare release package
         id: package
         shell: pwsh
@@ -104,52 +87,34 @@ jobs:
           Copy-Item README.md release/win-x64/README.md
           New-Item -ItemType Directory -Force release/win-x64/docs | Out-Null
           Copy-Item docs/*.md release/win-x64/docs/
-
-          Get-ChildItem release/win-x64/*.exe |
-            Get-FileHash -Algorithm SHA256 |
-            ForEach-Object {
-              "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))"
-            } | Set-Content release/win-x64/SHA256SUMS.txt
-
+          Get-ChildItem release/win-x64/*.exe | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content release/win-x64/SHA256SUMS.txt
           $date = (Get-Date).ToUniversalTime().ToString('yyyy.MM.dd')
           $tag = "v$date.${{ github.run_number }}"
           $title = "NeatWin $tag"
           $sha = "${{ needs.detect-merged-pr.outputs.sha }}"
           $pr = "${{ needs.detect-merged-pr.outputs.pr }}"
-
           Compress-Archive -Path release/win-x64/* -DestinationPath release/NeatWin-win-x64.zip -Force
           $zipHash = (Get-FileHash release/NeatWin-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           $exeHashes = Get-Content release/win-x64/SHA256SUMS.txt
-
           $notes = @(
-            "# $title",
-            "",
-            "正式发布包 / Formal release build",
-            "",
-            "- Source: merged PR #$pr",
-            "- Commit: $sha",
+            "# $title", "", "正式发布包 / Formal release build", "",
+            "- Source: merged PR #$pr", "- Commit: $sha",
             "- Verified by CI run: ${{ github.event.workflow_run.html_url }}",
             "- Windows: x64",
             "- Runtime: requires Microsoft .NET 10 Desktop Runtime x64 (framework-dependent; runtime is not bundled)",
-            "",
-            "## SHA-256",
-            "",
-            "$zipHash  NeatWin-win-x64.zip",
-            "",
-            $exeHashes
+            "", "## SHA-256", "", "$zipHash  NeatWin-win-x64.zip", "", $exeHashes
           )
           $notes | Set-Content release/RELEASE_NOTES.md
-
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "title=$title" >> $env:GITHUB_OUTPUT
-
       - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.package.outputs.tag }}" release/NeatWin-win-x64.zip release/win-x64/SHA256SUMS.txt --target "${{ needs.detect-merged-pr.outputs.sha }}" --title "${{ steps.package.outputs.title }}" --notes-file release/RELEASE_NOTES.md --latest
-
       - name: Upload workflow copy
         uses: actions/upload-artifact@v4
         with:

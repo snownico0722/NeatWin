@@ -18,13 +18,13 @@ internal sealed class SettingsStore
     internal HotkeyBinding LoadHotkey()
     {
         var settings = LoadStoredSettings();
-        if (!Enum.IsDefined(typeof(Keys), settings.Key))
+        if (!HotkeyBinding.IsValidKey(settings.Key))
         {
             return HotkeyBinding.Default;
         }
 
         return new HotkeyBinding(
-            (Keys)settings.Key,
+            settings.Key,
             settings.Control,
             settings.Alt,
             settings.Shift,

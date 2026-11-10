@@ -16,7 +16,7 @@ internal sealed record RecorderStatus(
 }
 
 /// <summary>
-/// Shared recorder engine used by the main application and the legacy standalone recorder UI.
+/// Integrated recorder engine owned by the WPF application.
 /// It records geometry/context only; no titles, process names, keystrokes, screenshots or pointer paths.
 /// </summary>
 internal sealed class RecorderSession : IDisposable
@@ -33,7 +33,7 @@ internal sealed class RecorderSession : IDisposable
     private readonly nint _moveHook;
     private readonly nint _contextHook;
     private readonly nint _foregroundHook;
-    private readonly System.Windows.Forms.Timer _timer;
+    private readonly System.Windows.Threading.DispatcherTimer _timer;
     private WorkspaceFrame? _lastContext;
     private Active? _active;
     private bool _contextDirty;
@@ -63,7 +63,7 @@ internal sealed class RecorderSession : IDisposable
         {
             _paused = true;
             _error = "另一个 NeatWin 记录器已经在运行；当前实例不会重复记录。";
-            _timer = new System.Windows.Forms.Timer { Interval = 250 };
+            _timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
             PublishStatus();
             return;
         }
@@ -86,7 +86,7 @@ internal sealed class RecorderSession : IDisposable
             _error = "窗口事件监听失败，未开始记录。请重新启动 NeatWin。";
         }
 
-        _timer = new System.Windows.Forms.Timer { Interval = 250 };
+        _timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += OnTimerTick;
         _timer.Start();
         PublishStatus();
@@ -301,7 +301,7 @@ internal sealed class RecorderSession : IDisposable
         _disposed = true;
         _timer.Stop();
         _timer.Tick -= OnTimerTick;
-        _timer.Dispose();
+
         if (_moveHook != nint.Zero) _ = NativeMethods.UnhookWinEvent(_moveHook);
         if (_contextHook != nint.Zero) _ = NativeMethods.UnhookWinEvent(_contextHook);
         if (_foregroundHook != nint.Zero) _ = NativeMethods.UnhookWinEvent(_foregroundHook);

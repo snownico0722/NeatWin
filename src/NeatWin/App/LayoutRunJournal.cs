@@ -13,7 +13,7 @@ internal sealed class LayoutRunJournal : IDisposable
     private readonly ObservationIdentityTracker _identity;
     private readonly string _session;
     private readonly RecorderSession? _recorder;
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 600 };
+    private readonly System.Windows.Threading.DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(600) };
     private readonly List<Pending> _pending = [];
     internal event Action<LayoutRunObservation>? Completed;
 
@@ -86,7 +86,7 @@ internal sealed class LayoutRunJournal : IDisposable
     }
 
     private static bool Near(RectI a, RectI b) => WindowStateRules.Near(a, b);
-    public void Dispose() { _timer.Stop(); _timer.Dispose(); _pending.Clear(); }
+    public void Dispose() { _timer.Stop(); _pending.Clear(); }
     private sealed class Pending(LayoutRunObservation observation, HashSet<nint> handles, long tick, long epoch, bool recorded)
     {
         internal LayoutRunObservation Observation { get; } = observation;

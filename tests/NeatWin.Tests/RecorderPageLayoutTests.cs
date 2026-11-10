@@ -1,6 +1,8 @@
-using System.Drawing;
 using System.Runtime.ExceptionServices;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
 using NeatWin.App;
 using NeatWin.Core;
 using NeatWin.Recording;
@@ -9,54 +11,81 @@ namespace NeatWin.Tests;
 
 public sealed class RecorderPageLayoutTests
 {
-    [Fact]
-    public void RecorderControlsAreInsideVisibleParentBoundsAndRemainClickable()
+    [Theory]
+    [InlineData(1000, 760)]
+    [InlineData(840, 620)]
+    public void RecorderActionsRemainVisibleAndClickable(double width, double height)
     {
-        Exception? failure = null;
-        var ui = new Thread(() =>
+        OnSta(() =>
         {
+            var window = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off) { Width = width, Height = height };
             try
             {
-                using var form = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
-                form.ShowRecorderPage();
-                form.SetRecorderStatus(new RecorderStatus(false, true, 7, 11, 1, null));
-                form.PerformLayout();
-                Application.DoEvents();
-                var title = Descendants(form).OfType<Label>().Single(c => c.Text == "内置习惯记录器");
-                AssertUnclipped(title);
-                var pauseCalls = 0; var exportCalls = 0;
-                form.RecorderPauseRequested += (_, _) => pauseCalls++;
-                form.RecorderExportRequested += (_, _) => exportCalls++;
-                foreach (var name in new[] { "暂停记录", "打开数据", "导出记录", "清空记录" })
+                window.ShowRecorderPage(); window.SetRecorderStatus(new RecorderStatus(false, true, 7, 11, 1, null));
+                window.UpdateLayout(); Pump();
+                var pause = 0; var export = 0;
+                window.RecorderPauseRequested += (_, _) => pause++;
+                window.RecorderExportRequested += (_, _) => export++;
+                foreach (var name in new[] { "RecorderPauseButton", "RecorderOpenButton", "RecorderExportButton", "RecorderClearButton" })
                 {
-                    var button = Descendants(form).OfType<Button>().Single(c => c.Text == name);
-                    AssertUnclipped(button);
-                    Assert.True(button.ClientSize.Width >= TextRenderer.MeasureText(button.Text, button.Font).Width);
+                    var button = Assert.IsType<Button>(window.FindName(name));
+                    Assert.True(button.IsVisible && button.ActualWidth > 0 && button.ActualHeight > 0);
+                    var rect = button.TransformToAncestor(window).TransformBounds(new Rect(button.RenderSize));
+                    Assert.True(rect.Left >= 0 && rect.Top >= 0 && rect.Right <= window.ActualWidth && rect.Bottom <= window.ActualHeight);
+                    var presenter = Descendants(button).OfType<ContentPresenter>().First();
+                    Assert.True(presenter.ActualWidth >= 35, "Button label has no usable space.");
                 }
-                Descendants(form).OfType<Button>().Single(c => c.Text == "暂停记录").PerformClick();
-                Descendants(form).OfType<Button>().Single(c => c.Text == "导出记录").PerformClick();
-                Assert.Equal(1, pauseCalls);
-                Assert.Equal(1, exportCalls);
-                form.AllowCloseAndClose();
+                ((Button)window.FindName("RecorderPauseButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                ((Button)window.FindName("RecorderExportButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.Equal(1, pause); Assert.Equal(1, export);
             }
-            catch (Exception e) { failure = e; }
+            finally { window.AllowCloseAndClose(); }
+        });
+    }
+    [Fact]
+    public void FourAutomationChoicesAndNativeVirtualKeyBindingArePreserved()
+    {
+        OnSta(() =>
+        {
+            var window = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
+            try
+            {
+                window.Show(); window.UpdateLayout(); Pump();
+                var choices = Descendants(window).OfType<RadioButton>().Where(b => b.GroupName == "Automation").ToArray();
+                Assert.Equal(4, choices.Length);
+                var changed = new List<AutomaticLayoutMode>();
+                window.AutoTidyChangeRequested += (_, e) => changed.Add(e.Mode);
+                foreach (var choice in choices.OrderBy(b => int.Parse((string)b.Tag))) choice.IsChecked = true;
+                Assert.Equal(new[] { AutomaticLayoutMode.LightAssist, AutomaticLayoutMode.FullAssist, AutomaticLayoutMode.AutoFullAssist }, changed);
+                Assert.Equal(0x54, HotkeyBinding.Default.Key);
+                Assert.Equal("T", HotkeyBinding.FormatKey(0x54));
+                Assert.Equal("F12", HotkeyBinding.FormatKey(0x7B));
+            }
+            finally { window.AllowCloseAndClose(); }
+        });
+    }
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        { var child = VisualTreeHelper.GetChild(parent, i); yield return child; foreach (var descendant in Descendants(child)) yield return descendant; }
+    }
+    private static void Pump()
+    {
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+    }
+    private static void OnSta(Action action)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { action(); }
+            catch (Exception error) { failure = error; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
         }) { IsBackground = true };
-        ui.SetApartmentState(ApartmentState.STA);
-        ui.Start();
-        Assert.True(ui.Join(15000), "Recorder page layout did not complete.");
+        thread.SetApartmentState(ApartmentState.STA); thread.Start();
+        Assert.True(thread.Join(15000), "WPF UI check did not finish.");
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
-
-    private static void AssertUnclipped(Control control)
-    {
-        Assert.True(control.Visible && control.Width > 0 && control.Height > 0);
-        var bounds = control.RectangleToScreen(control.ClientRectangle);
-        var clipped = bounds;
-        for (var parent = control.Parent; parent is not null; parent = parent.Parent)
-            clipped = Rectangle.Intersect(clipped, parent.RectangleToScreen(parent.ClientRectangle));
-        Assert.Equal(bounds, clipped);
-    }
-
-    private static IEnumerable<Control> Descendants(Control parent) => parent.Controls.Cast<Control>()
-        .SelectMany(c => new[] { c }.Concat(Descendants(c)));
 }

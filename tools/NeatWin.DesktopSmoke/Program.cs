@@ -1,3 +1,10 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -12,13 +19,13 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
+        var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         if (args.Length > 0 && args[0] == "--child")
         {
-            using var form = new SyntheticWindow { Text = "NeatWin synthetic smoke window", Size = new Size(500, 400),
-                StartPosition = FormStartPosition.Manual, Location = new Point(80 + int.Parse(args[1]) * 90, 80) };
-            Application.Run(form);
+            var form = new SyntheticWindow { Title = "NeatWin synthetic smoke window", Width = 500, Height = 400,
+                WindowStartupLocation = WindowStartupLocation.Manual, Left = 80 + int.Parse(args[1]) * 90, Top = 80 };
+            application.ShutdownMode = ShutdownMode.OnMainWindowClose;
+            application.Run(form);
             return 0;
         }
         var children = new List<Process>();
@@ -30,7 +37,7 @@ internal static class Program
                 var child = Process.Start(new ProcessStartInfo(exe, $"--child {i}") { UseShellExecute = false })
                     ?? throw new InvalidOperationException("Child did not start.");
                 children.Add(child);
-                // Console-subsystem helper processes can create WinForms later; readiness is
+                // Console-subsystem helper processes can create WPF windows later; readiness is
                 // established by the actual captured windows below, not WaitForInputIdle.
             }
             VerifyElevatedTargets(children);
@@ -77,8 +84,6 @@ internal static class Program
             VerifyAutomaticModes(manager, ids);
             VerifyModeSelector();
             VerifyIntegratedRecording(manager, manager.Capture().First(w => w.Handle == windows[0].Handle));
-            if (args.Length == 1)
-                VerifyRecorder(args[0], manager.Capture().First(w => w.Handle == windows[0].Handle), children);
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -141,33 +146,24 @@ internal static class Program
 
     private static void VerifyModeSelector()
     {
-        using var form = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
-        form.Show(); Pump(100);
-        Require(!Descendants(form).OfType<ComboBox>().Any(c => c.AccessibleName == "自动整理档位"), "Automation is still a dropdown.");
-        var selector = Descendants(form).OfType<SegmentedSelector<AutomaticLayoutMode>>().Single();
-        var choices = Descendants(selector).OfType<Button>().ToArray();
-        Require(choices.Length == 4, "Mode selector does not expose exactly four choices.");
-        var changes = 0;
-        form.AutoTidyChangeRequested += (_, _) => changes++;
-        foreach (var mode in Enum.GetValues<AutomaticLayoutMode>())
-            choices.Single(b => b.Text == AutomaticLayoutPolicy.Name(mode)).PerformClick();
-        Require(changes == 3, "Mode selection did not produce exactly the expected changes.");
-        var settingsTab = Descendants(form).OfType<Button>().Single(b => b.Text == "整理设置");
-        foreach (var button in choices)
-            Require(button.Visible && button.PointToScreen(Point.Empty).Y < settingsTab.PointToScreen(Point.Empty).Y &&
-                button.Width >= TextRenderer.MeasureText(button.Text, button.Font).Width,
-                "Four choices must be visible, readable and above the tabs.");
-        Require(!Descendants(form).OfType<Button>().Any(b => b.Text == "完整平铺"), "Unexpected fifth tiling action.");
-        var recorderTab = Descendants(form).OfType<Button>().Single(b => b.Text == "记录器");
-        recorderTab.PerformClick(); Pump(80);
-        form.SetRecorderStatus(new RecorderStatus(false, true, 7, 11, 1, null));
-        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "暂停记录"), "Recorder pause is missing.");
-        Require(Descendants(form).OfType<Button>().Any(b => b.Visible && b.Text == "导出记录"), "Recorder export is missing.");
-        using var image = new Bitmap(form.Width, form.Height);
-        form.DrawToBitmap(image, new Rectangle(Point.Empty, image.Size));
-        image.Save("automation-mode-ui.png", System.Drawing.Imaging.ImageFormat.Png);
-        form.AllowCloseAndClose();
-        Console.WriteLine("PASS: four directly clickable modes across the top; no tiling action; integrated recorder tab; screenshot retained.");
+        var window = new MainWindow(HotkeyBinding.Default, new(), new(), AutomaticLayoutMode.Off);
+        try
+        {
+            window.Show(); Pump(100);
+            var choices = Descendants(window).OfType<RadioButton>().Where(b => b.GroupName == "Automation").ToArray();
+            Require(choices.Length == 4 && choices.All(b => b.IsVisible && b.ActualWidth >= 75), "Four automation choices must remain directly visible.");
+            var changes = 0; window.AutoTidyChangeRequested += (_, _) => changes++;
+            foreach (var choice in choices.OrderBy(b => int.Parse((string)b.Tag))) choice.IsChecked = true;
+            Require(changes == 3, "Automation selector emitted the wrong transitions.");
+            window.ShowRecorderPage(); window.SetRecorderStatus(new RecorderStatus(false, true, 7, 11, 1, null)); Pump(80);
+            Require(((Button)window.FindName("RecorderPauseButton")).IsVisible, "Recorder pause is missing.");
+            Require(((Button)window.FindName("RecorderExportButton")).IsVisible, "Recorder export is missing.");
+            var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(window); var png = new PngBitmapEncoder(); png.Frames.Add(BitmapFrame.Create(bitmap));
+            using var file = File.Create("automation-mode-ui.png"); png.Save(file);
+            Console.WriteLine("PASS: real WPF view exposes four modes and the integrated recorder controls.");
+        }
+        finally { window.AllowCloseAndClose(); }
     }
 
     private static void VerifyIntegratedRecording(WindowManager manager, WindowSnapshot targetWindow)
@@ -233,12 +229,17 @@ internal static class Program
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(nint handle);
 
-    private static IEnumerable<Control> Descendants(Control root) => root.Controls.Cast<Control>()
-        .SelectMany(c => new[] { c }.Concat(Descendants(c)));
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        { var child = VisualTreeHelper.GetChild(root, i); yield return child; foreach (var nested in Descendants(child)) yield return nested; }
+    }
     private static void Pump(int milliseconds)
     {
-        var watch = Stopwatch.StartNew();
-        while (watch.ElapsedMilliseconds < milliseconds) { Application.DoEvents(); Thread.Sleep(15); }
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start(); Dispatcher.PushFrame(frame);
     }
     private static void Until(Func<bool> ready, int limit, string error)
     {
@@ -247,112 +248,24 @@ internal static class Program
         Require(ready(), error);
     }
 
-    private static void VerifyRecorder(string recorderPath, WindowSnapshot window, List<Process> children)
+    private sealed class SyntheticWindow : Window
     {
-        var started = DateTimeOffset.UtcNow;
-        var startInfo = new ProcessStartInfo(Path.GetFullPath(recorderPath)) { UseShellExecute = false, RedirectStandardError = true };
-        startInfo.Environment["NEATWIN_EVENT_DIAGNOSTICS"] = "1";
-        var recorder = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Recorder did not start.");
-        children.Add(recorder);
-        recorder.ErrorDataReceived += (_, e) => { if (e.Data is not null) Console.WriteLine("Recorder event: " + e.Data); };
-        recorder.BeginErrorReadLine();
-        Require(recorder.WaitForInputIdle(15000), "Recorder has no message loop.");
-        // Input-idle can be reached by a startup/helper message loop before the constructor
-        // installs its hooks. The recorder shows its normal panel only after initialization.
-        var readiness = Stopwatch.StartNew();
-        do
+        protected override void OnSourceInitialized(EventArgs e)
         {
-            Thread.Sleep(100);
-            recorder.Refresh();
-            Require(!recorder.HasExited, "Recorder exited during initialization.");
-        } while ((recorder.MainWindowHandle == nint.Zero || !recorder.MainWindowTitle.Contains("习惯记录器 v2")) && readiness.ElapsedMilliseconds < 15000);
-        Require(recorder.MainWindowHandle != nint.Zero && recorder.MainWindowTitle.Contains("习惯记录器 v2"), "Recorder did not show its initialized panel.");
-        Thread.Sleep(150);
-        Require(window.IsManageable, "Synthetic window is not manageable.");
-        // Ask the synthetic child to enter the system move loop; system-only events are not forged.
-        Require(PostMessage(window.Handle, 0x8005, nint.Zero, nint.Zero), "Synthetic lifecycle request failed.");
-        // Posted WM_KEYDOWN messages are not equivalent to the real keyboard input stream.
-        // This test injects only into its own foreground child on the isolated x64 CI desktop.
-        Require(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" && IntPtr.Size == 8,
-            "Input smoke test is restricted to the isolated x64 Actions desktop.");
-        Thread.Sleep(350);
-        for (var step = 0; step < 4; step++)
-        {
-            PressKey(window.Handle, 0x27);
-            Thread.Sleep(180);
+            base.OnSourceInitialized(e);
+            HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)!.AddHook(OnMessage);
         }
-        PressKey(window.Handle, 0x0D);
-        var watch = Stopwatch.StartNew();
-        while (watch.ElapsedMilliseconds < 8000)
+        private nint OnMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
         {
-            Thread.Sleep(200);
-            foreach (var path in Directory.Exists(IntentReferenceStore.DefaultDirectory)
-                ? Directory.GetFiles(IntentReferenceStore.DefaultDirectory, "adjustments-*.jsonl") : [])
+            switch (message)
             {
-                using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
-                while (reader.ReadLine() is string line)
-                {
-                    WindowAdjustmentObservation? observation;
-                    try { observation = JsonSerializer.Deserialize<WindowAdjustmentObservation>(line); }
-                    catch (JsonException) { continue; }
-                    if (observation is null || observation.Time < started || observation.Version != 2) continue;
-                    Require(observation.StartContext is not null && observation.EndContext is not null && observation.SettledContext is not null,
-                        "Recorder omitted before, after or settled context.");
-                    Require(observation.End.X != observation.Start.X, "Recorder lost the synthetic movement.");
-                    Require(!line.Contains("Process") && !line.Contains("Handle") && !line.Contains("Title"), "Native identities or titles leaked into record.");
-                    Console.WriteLine("PASS: independent recorder consumed synthetic move/size events and persisted v2 geometry/layer contexts without native IDs.");
-                    recorder.Kill(); recorder.WaitForExit(5000);
-                    return;
-                }
+                case 0x8006: Left += 25; break;
+                case 0x8007: WindowState = WindowState.Minimized; break;
+                case 0x8008: WindowState = WindowState.Normal; break;
+                case 0x8005: Activate(); PostMessage(hwnd, 0x0112, (nint)0xF010, 0); break;
+                default: return 0;
             }
-        }
-        recorder.Refresh();
-        if (!recorder.HasExited && recorder.MainWindowHandle != nint.Zero)
-        {
-            EnumChildWindows(recorder.MainWindowHandle, (child, _) =>
-            {
-                var text = new System.Text.StringBuilder(2048);
-                GetWindowText(child, text, text.Capacity);
-                if (text.Length > 0) Console.WriteLine("Recorder UI: " + text);
-                return true;
-            }, nint.Zero);
-        }
-        var actual = new WindowManager().Capture().FirstOrDefault(w => w.Handle == window.Handle);
-        Console.WriteLine($"Synthetic window moved: {actual?.VisualRect.X != window.VisualRect.X}; recorder exited: {recorder.HasExited}");
-        throw new InvalidOperationException("Recorder did not persist the synthetic gesture.");
-    }
-
-    private static void PressKey(nint ownedWindow, ushort key)
-    {
-        Require(GetForegroundWindow() == ownedWindow, "Synthetic input target lost foreground focus; no keys sent.");
-        var inputs = new[] { new Input { Type = 1, VirtualKey = key }, new Input { Type = 1, VirtualKey = key, Flags = 2 } };
-        Require(SendInput(2, inputs, Marshal.SizeOf<Input>()) == 2, "Synthetic keyboard input was not accepted.");
-    }
-    [StructLayout(LayoutKind.Explicit, Size = 40)] // Win64 INPUT; the union begins at byte 8.
-    private struct Input
-    {
-        [FieldOffset(0)] public uint Type;
-        [FieldOffset(8)] public ushort VirtualKey;
-        [FieldOffset(12)] public uint Flags;
-    }
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(uint count, Input[] inputs, int size);
-
-    private sealed class SyntheticWindow : Form
-    {
-        protected override void WndProc(ref Message message)
-        {
-            if (message.Msg == 0x8006) { Left += 25; return; }
-            if (message.Msg == 0x8007) { WindowState = FormWindowState.Minimized; return; }
-            if (message.Msg == 0x8008) { WindowState = FormWindowState.Normal; return; }
-            if (message.Msg == 0x8005)
-            {
-                Activate();
-                PostMessage(Handle, 0x0112, (nint)0xF010, nint.Zero); // SC_MOVE; input is posted by the parent
-                return;
-            }
-            base.WndProc(ref message);
+            handled = true; return 0;
         }
     }
 
