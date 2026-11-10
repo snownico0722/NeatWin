@@ -9,8 +9,10 @@ namespace NeatWin.App;
 /// after a real user move/resize. It never records keys, titles or screenshots. Pointer history is
 /// kept only in memory and high-frequency sampling runs only while a window is in a move/size loop.
 /// </summary>
-internal sealed class AutoTidyManager : NativeWindow, IDisposable
+internal sealed class AutoTidyManager : IDisposable
 {
+    private readonly MessageWindow _messages;
+    private nint Handle => _messages.Handle;
     private const int MoveSizeStartMessage = 0x8000 + 71;
     private const int MoveSizeEndMessage = 0x8000 + 72;
     private const int ClickMessage = 0x8000 + 73;
@@ -21,9 +23,9 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     private readonly NativeMethods.WinEventProc _winEventProc;
     private readonly NativeMethods.LowLevelMouseProc _mouseProc;
-    private readonly System.Windows.Forms.Timer _debounceTimer;
-    private readonly System.Windows.Forms.Timer _attentionTimer;
-    private readonly System.Windows.Forms.Timer _dragTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _debounceTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _attentionTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _dragTimer;
     private readonly nint _eventHook;
     private nint _mouseHook;
     private readonly Dictionary<nint, AttentionState> _attention = new();
@@ -38,17 +40,13 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
 
     internal AutoTidyManager()
     {
-        CreateHandle(new CreateParams
-        {
-            Caption = "NeatWin.InteractionWindow",
-            Parent = NativeMethods.HwndMessage,
-        });
+        _messages = new MessageWindow("NeatWin.InteractionWindow", OnMessage);
 
-        _debounceTimer = new System.Windows.Forms.Timer { Interval = DebounceMilliseconds };
+        _debounceTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(DebounceMilliseconds) };
         _debounceTimer.Tick += OnDebounceTick;
-        _attentionTimer = new System.Windows.Forms.Timer { Interval = AttentionSampleMilliseconds };
+        _attentionTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AttentionSampleMilliseconds) };
         _attentionTimer.Tick += OnAttentionTick;
-        _dragTimer = new System.Windows.Forms.Timer { Interval = DragSampleMilliseconds };
+        _dragTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(DragSampleMilliseconds) };
         _dragTimer.Tick += OnDragTick;
 
         _winEventProc = OnWinEvent;
@@ -73,7 +71,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
     internal bool IsGestureActive => _activeGesture is not null;
 
     internal bool IsAvailable => _eventHook != nint.Zero;
-    internal bool PointerTrackingActive => _attentionTimer.Enabled || _dragTimer.Enabled || _mouseHook != nint.Zero;
+    internal bool PointerTrackingActive => _attentionTimer.IsEnabled || _dragTimer.IsEnabled || _mouseHook != nint.Zero;
 
     internal bool Enabled
     {
@@ -177,9 +175,6 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         _debounceTimer.Tick -= OnDebounceTick;
         _attentionTimer.Tick -= OnAttentionTick;
         _dragTimer.Tick -= OnDragTick;
-        _debounceTimer.Dispose();
-        _attentionTimer.Dispose();
-        _dragTimer.Dispose();
 
         if (_eventHook != nint.Zero)
         {
@@ -192,7 +187,7 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         }
 
         _attention.Clear();
-        DestroyHandle();
+        _messages.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -246,22 +241,18 @@ internal sealed class AutoTidyManager : NativeWindow, IDisposable
         return NativeMethods.CallNextHookEx(_mouseHook, code, message, dataPointer);
     }
 
-    protected override void WndProc(ref Message message)
+    private nint OnMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
-        switch (message.Msg)
+        if (_disposed) return 0;
+        switch (message)
         {
-            case MoveSizeStartMessage:
-                BeginGesture(message.WParam);
-                return;
-            case MoveSizeEndMessage:
-                EndGesture(message.WParam);
-                return;
-            case ClickMessage:
-                if (_enabled) TouchClick(message.WParam);
-                return;
+            case MoveSizeStartMessage: BeginGesture(wParam); break;
+            case MoveSizeEndMessage: EndGesture(wParam); break;
+            case ClickMessage: if (_enabled) TouchClick(wParam); break;
+            default: return 0;
         }
-
-        base.WndProc(ref message);
+        handled = true;
+        return 0;
     }
 
     private void BeginGesture(nint hwnd)

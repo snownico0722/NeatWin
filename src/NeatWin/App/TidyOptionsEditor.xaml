@@ -1,0 +1,46 @@
+<UserControl x:Class="NeatWin.App.TidyOptionsEditor"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:ui="clr-namespace:NeatWin.Presentation">
+ <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/NeatWin;component/Presentation/Design.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+ <StackPanel>
+  <Border x:Name="SmartCard" Style="{StaticResource Card}" Margin="0,0,0,14"><StackPanel>
+   <TextBlock Text="智能整理" Style="{StaticResource SectionTitle}"/>
+   <TextBlock Text="理解窗口之间的关系，整理位置与尺寸，谨慎改变前后层级。" Style="{StaticResource MutedText}" Margin="0,6,0,14"/>
+   <UniformGrid Columns="3" Margin="0,0,0,16">
+    <RadioButton x:Name="GentleStrength" Content="保守" GroupName="Strength" Checked="Changed" Style="{StaticResource Segment}"/>
+    <RadioButton x:Name="BalancedStrength" Content="平衡" GroupName="Strength" Checked="Changed" Style="{StaticResource Segment}" Margin="6,0"/>
+    <RadioButton x:Name="AssertiveStrength" Content="积极" GroupName="Strength" Checked="Changed" Style="{StaticResource Segment}"/>
+   </UniformGrid>
+   <CheckBox x:Name="VerticalFill" Content="接近全高时贴满上下，拖动即可恢复" Checked="Changed" Unchecked="Changed" Margin="0,0,0,12"/>
+   <CheckBox x:Name="VideoBars" Content="调整浏览器窗口比例，减少视频黑边" Checked="Changed" Unchecked="Changed"/>
+   <StackPanel x:Name="VideoTendencyRow" Orientation="Horizontal" Margin="0,12,0,0">
+    <RadioButton x:Name="ShrinkVideo" Content="缩小优先" GroupName="Video" Checked="Changed" Style="{StaticResource Segment}"/>
+    <RadioButton x:Name="ExpandVideo" Content="放大优先" GroupName="Video" Checked="Changed" Style="{StaticResource Segment}" Margin="6,0,0,0"/>
+   </StackPanel>
+  </StackPanel></Border>
+  <Border x:Name="ClassicCard" Style="{StaticResource Card}" Margin="0,0,0,14" Visibility="Collapsed">
+   <StackPanel>
+    <TextBlock Text="规则整理" Style="{StaticResource SectionTitle}"/>
+    <TextBlock Text="按邻近、对齐与屏幕边缘规则进行小范围调整。" Style="{StaticResource MutedText}" Margin="0,6,0,12"/>
+    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <TextBlock Text="邻近吸合（px）" VerticalAlignment="Center"/><ui:IntegerInput x:Name="NeighborSnap" Grid.Column="1" Minimum="0" Maximum="240" Step="4" Margin="0,4" ValueChanged="ValueChanged"/>
+     <TextBlock Grid.Row="1" Text="边缘对齐（px）" VerticalAlignment="Center"/><ui:IntegerInput x:Name="AlignmentSnap" Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="120" Step="2" Margin="0,4" ValueChanged="ValueChanged"/>
+     <TextBlock Grid.Row="2" Text="贴屏边（px）" VerticalAlignment="Center"/><ui:IntegerInput x:Name="ScreenSnap" Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="240" Step="4" Margin="0,4" ValueChanged="ValueChanged"/>
+     <TextBlock Grid.Row="3" Text="单条边最大调整（px）" VerticalAlignment="Center"/><ui:IntegerInput x:Name="MaximumAdjustment" Grid.Row="3" Grid.Column="1" Minimum="0" Maximum="480" Step="8" Margin="0,4" ValueChanged="ValueChanged"/>
+     <TextBlock Grid.Row="4" Text="最大尺寸变化（%）" VerticalAlignment="Center"/><ui:IntegerInput x:Name="MaximumResize" Grid.Row="4" Grid.Column="1" Minimum="0" Maximum="50" Margin="0,4" ValueChanged="ValueChanged"/>
+     <TextBlock Grid.Row="5" Text="迭代轮数" VerticalAlignment="Center"/><ui:IntegerInput x:Name="Passes" Grid.Row="5" Grid.Column="1" Minimum="1" Maximum="5" Margin="0,4" ValueChanged="ValueChanged"/>
+    </Grid>
+   </StackPanel>
+  </Border>
+  <Border Style="{StaticResource Card}" Margin="0,0,0,12"><StackPanel>
+   <TextBlock Text="窗口保护" Style="{StaticResource SectionTitle}" Margin="0,0,0,12"/>
+   <CheckBox x:Name="RescueOffscreen" Content="拉回当前可见、部分出屏的窗口" Checked="Changed" Unchecked="Changed"/>
+  </StackPanel></Border>
+  <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <TextBlock x:Name="OptionsStatus" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+   <Button Grid.Column="1" Content="恢复默认" Click="ResetDefaults" Style="{StaticResource QuietButton}"/>
+  </Grid>
+ </StackPanel>
+</UserControl>

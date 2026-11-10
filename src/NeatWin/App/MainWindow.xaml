@@ -1,0 +1,112 @@
+<Window x:Class="NeatWin.App.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:NeatWin.App"
+ Title="NeatWin · 人因任务排布" Width="1000" Height="760" MinWidth="840" MinHeight="620"
+ WindowStartupLocation="CenterScreen" Background="{DynamicResource PageBrush}"
+ Closing="OnWindowClosing">
+ <Window.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries>
+  <ResourceDictionary Source="/NeatWin;component/Presentation/Design.xaml" />
+ </ResourceDictionary.MergedDictionaries></ResourceDictionary></Window.Resources>
+ <Grid Margin="22">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid Margin="0,0,0,22">
+   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <StackPanel><TextBlock Text="NeatWin" FontSize="27" FontWeight="SemiBold"/>
+    <TextBlock Text="让窗口各就其位，也保留你的使用习惯。" Style="{StaticResource MutedText}" Margin="0,5,0,0"/>
+   </StackPanel>
+   <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+    <Border Background="{DynamicResource RaisedBrush}" CornerRadius="7" Padding="10,6" Margin="0,0,10,0">
+     <TextBlock x:Name="ElevationLabel" Text="桌面工作区" Style="{StaticResource MutedText}"/>
+    </Border>
+    <Button Content="◐" Click="ToggleTheme" ToolTip="切换深浅主题" AutomationProperties.Name="切换深浅主题" MinWidth="36"/>
+   </StackPanel>
+  </Grid>
+  <Grid Grid.Row="1">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="152"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Margin="0,20,0,0">
+     <Button Content="排布偏好" Click="PreferencesClick" Style="{StaticResource QuietButton}" HorizontalContentAlignment="Left"/>
+     <TextBlock Text="关闭窗口后仍在托盘运行" Style="{StaticResource MutedText}" FontSize="11" Margin="10,12,0,8"/>
+     <Button Content="退出 NeatWin" Click="ExitClick" Style="{StaticResource QuietButton}" HorizontalContentAlignment="Left"/>
+    </StackPanel>
+    <StackPanel>
+     <RadioButton x:Name="LayoutNavigation" Content="窗口整理" GroupName="Navigation" Tag="layout" IsChecked="True" Checked="Navigate" Style="{StaticResource NavigationItem}"/>
+     <RadioButton x:Name="ShortcutNavigation" Content="快捷键" GroupName="Navigation" Tag="shortcuts" Checked="Navigate" Style="{StaticResource NavigationItem}" Margin="0,6,0,0"/>
+     <RadioButton x:Name="RecorderNavigation" Content="记录器" GroupName="Navigation" Tag="recorder" Checked="Navigate" Style="{StaticResource NavigationItem}" Margin="0,6,0,0"/>
+    </StackPanel>
+   </DockPanel>
+   <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,12,4">
+    <Grid>
+     <StackPanel x:Name="LayoutPage">
+      <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+       <StackPanel>
+        <TextBlock Text="自动整理" Style="{StaticResource SectionTitle}"/>
+        <UniformGrid Columns="4" Margin="0,12,0,10">
+         <RadioButton x:Name="AutoOff" GroupName="Automation" Tag="0" Content="自动关" Checked="AutomationChanged" Style="{StaticResource Segment}"/>
+         <RadioButton x:Name="AutoLight" GroupName="Automation" Tag="1" Content="轻度辅助" Checked="AutomationChanged" Style="{StaticResource Segment}" Margin="5,0,0,0"/>
+         <RadioButton x:Name="AutoFull" GroupName="Automation" Tag="2" Content="完整辅助" Checked="AutomationChanged" Style="{StaticResource Segment}" Margin="5,0,0,0"/>
+         <RadioButton x:Name="AutoWorkspace" GroupName="Automation" Tag="3" Content="自动完整辅助" Checked="AutomationChanged" Style="{StaticResource Segment}" Margin="5,0,0,0"/>
+        </UniformGrid>
+        <TextBlock x:Name="AutomationDescription" Style="{StaticResource MutedText}"/>
+       </StackPanel>
+      </Border>
+      <Grid Margin="0,3,0,12">
+       <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <TextBlock Text="整理方式" Style="{StaticResource SectionTitle}" VerticalAlignment="Center"/>
+       <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <RadioButton x:Name="SmartAlgorithm" Content="Smart" Tag="0" GroupName="Algorithm" Checked="AlgorithmChanged" Style="{StaticResource Segment}" MinWidth="84"/>
+        <RadioButton x:Name="ClassicAlgorithm" Content="Classic" Tag="1" GroupName="Algorithm" Checked="AlgorithmChanged" Style="{StaticResource Segment}" Margin="5,0,0,0" MinWidth="84"/>
+       </StackPanel>
+      </Grid>
+      <local:TidyOptionsEditor x:Name="OptionsEditor"/>
+     </StackPanel>
+     <StackPanel x:Name="ShortcutsPage" Visibility="Collapsed">
+      <TextBlock Text="随时整理，不必打开窗口" Style="{StaticResource SectionTitle}" Margin="0,0,0,6"/>
+      <TextBlock Text="选择修饰键与一个按键，保存后立即生效。" Style="{StaticResource MutedText}" Margin="0,0,0,18"/>
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="全局整理快捷键" FontWeight="SemiBold" Margin="0,0,0,15"/>
+       <WrapPanel>
+        <CheckBox x:Name="ControlKey" Content="Ctrl" Margin="0,0,16,10"/>
+        <CheckBox x:Name="AltKey" Content="Alt" Margin="0,0,16,10"/>
+        <CheckBox x:Name="ShiftKey" Content="Shift" Margin="0,0,16,10"/>
+        <CheckBox x:Name="WinKey" Content="Win" Margin="0,0,16,10"/>
+        <ComboBox x:Name="HotkeySelector" Width="120" DisplayMemberPath="Label" SelectedValuePath="Code" Margin="0,0,0,10" AutomationProperties.Name="快捷键按键"/>
+       </WrapPanel>
+       <Button Content="保存快捷键" Click="ApplyHotkey" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,10,0,14"/>
+       <TextBlock x:Name="HotkeyStatus" Style="{StaticResource MutedText}"/>
+      </StackPanel></Border>
+     </StackPanel>
+     <StackPanel x:Name="RecorderPage" Visibility="Collapsed">
+      <TextBlock Text="记录窗口习惯，而不是你的内容" Style="{StaticResource SectionTitle}" Margin="0,0,0,6"/>
+      <TextBlock Text="仅保存在本机。不会采集标题、应用名、按键、截图或鼠标轨迹，也不会上传。" Style="{StaticResource MutedText}" Margin="0,0,0,18"/>
+      <Border Style="{StaticResource Card}" Margin="0,0,0,14"><StackPanel>
+       <TextBlock x:Name="RecorderState" Text="尚未开始" FontSize="22" FontWeight="SemiBold"/>
+       <TextBlock x:Name="RecorderCounts" Text="等待记录状态" Style="{StaticResource MutedText}" Margin="0,8,0,16"/>
+       <WrapPanel>
+        <Button x:Name="RecorderPauseButton" Content="暂停记录" Click="RecorderPauseClick" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8"/>
+        <Button x:Name="RecorderExportButton" Content="导出 ZIP" Click="RecorderExportClick" Margin="0,0,8,8"/>
+        <Button x:Name="RecorderOpenButton" Content="打开目录" Click="RecorderOpenClick" Margin="0,0,8,8"/>
+        <Button x:Name="RecorderClearButton" Content="清空记录" Click="RecorderClearClick" Style="{StaticResource DangerButton}" Margin="0,0,0,8"/>
+       </WrapPanel>
+       <TextBlock x:Name="RecorderError" Foreground="{DynamicResource DangerBrush}" Margin="0,6,0,0"/>
+      </StackPanel></Border>
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="记录与自动整理相互独立" FontWeight="SemiBold" Margin="0,0,0,6"/>
+       <TextBlock Text="暂停记录不会关闭窗口整理。清空记录也不会删除快捷键、整理模式和其他设置。" Style="{StaticResource MutedText}"/>
+      </StackPanel></Border>
+     </StackPanel>
+    </Grid>
+   </ScrollViewer>
+  </Grid>
+  <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,16,0,0">
+   <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <TextBlock x:Name="ActivityLabel" Text="准备就绪。只整理当前可见的普通窗口。" VerticalAlignment="Center" Margin="0,0,20,0" Style="{StaticResource MutedText}"/>
+    <StackPanel Grid.Column="1" Orientation="Horizontal">
+     <Button Content="撤销" Click="UndoClick" Margin="0,0,8,0"/>
+     <Button Content="整理窗口" Click="TidyClick" Style="{StaticResource PrimaryButton}" MinWidth="110"/>
+    </StackPanel>
+   </Grid>
+  </Border>
+ </Grid>
+</Window>

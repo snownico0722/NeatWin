@@ -5,8 +5,10 @@ using Microsoft.Win32;
 namespace NeatWin.App;
 
 /// <summary>Cheap native notifications; capture/plan/apply only on the owning UI thread.</summary>
-internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
+internal sealed class WorkspaceAutoTidyMonitor : IDisposable
 {
+    private readonly MessageWindow _messages;
+    private nint Handle => _messages.Handle;
     private const int ChangedMessage = 0x8000 + 79;
     private readonly Func<IReadOnlyList<WindowSnapshot>> _capture;
     private readonly Func<bool> _busy;
@@ -14,7 +16,7 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
     private readonly NativeMethods.WinEventProc _callback;
     private readonly List<nint> _hooks = [];
     private readonly Dictionary<nint, nint> _observedStamps = new();
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 150 };
+    private readonly System.Windows.Threading.DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private int _messageQueued;
     private bool _disposed;
     internal event Action<AutomaticLayoutRequest>? Requested;
@@ -25,7 +27,7 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
     internal WorkspaceAutoTidyMonitor(Func<IReadOnlyList<WindowSnapshot>> capture, Func<bool> busy)
     {
         _capture = capture; _busy = busy; _callback = OnWinEvent;
-        CreateHandle(new CreateParams { Caption = "NeatWin.AutomaticLayout", Parent = NativeMethods.HwndMessage });
+        _messages = new MessageWindow("NeatWin.AutomaticLayout", OnMessage);
         _timer.Tick += OnTick;
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         SystemEvents.UserPreferenceChanged += OnPreferencesChanged;
@@ -83,15 +85,15 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
         if (_disposed || !AutomaticLayoutPolicy.WatchesWorkspace(Mode) || Interlocked.Exchange(ref _messageQueued, 1) != 0) return;
         if (!NativeMethods.PostMessage(Handle, ChangedMessage, 0, 0)) Interlocked.Exchange(ref _messageQueued, 0);
     }
-    protected override void WndProc(ref Message m)
+    private nint OnMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
-        if (m.Msg == ChangedMessage)
+        if (message == ChangedMessage)
         {
             Interlocked.Exchange(ref _messageQueued, 0);
             if (!_disposed && AutomaticLayoutPolicy.WatchesWorkspace(Mode)) _timer.Start();
-            return;
+            handled = true;
         }
-        base.WndProc(ref m);
+        return 0;
     }
     private void OnTick(object? sender, EventArgs e)
     {
@@ -125,9 +127,9 @@ internal sealed class WorkspaceAutoTidyMonitor : NativeWindow, IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true; _timer.Stop(); _timer.Dispose(); RemoveHooks();
+        _disposed = true; _timer.Stop(); RemoveHooks();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         SystemEvents.UserPreferenceChanged -= OnPreferencesChanged;
-        DestroyHandle(); GC.SuppressFinalize(this);
+        _messages.Dispose(); GC.SuppressFinalize(this);
     }
 }

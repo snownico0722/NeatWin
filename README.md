@@ -4,9 +4,9 @@ Windows 浮动窗口整理工具，内置习惯记录器。把粗摆当作意图
 
 ## 使用
 
-发布包中的 `NeatWin.exe` 是主程序，并已内置习惯记录器；`NeatWin.Recorder.exe` 只为兼容旧工作流和需要单独运行记录器的场景保留。两者都是 Windows x64 的 framework-dependent 单文件程序，**不再附带 .NET 运行时**。运行前需安装 **Microsoft .NET 10 Desktop Runtime x64**。NeatWin 通过应用清单请求管理员权限，启动时会出现 UAC 提示，以便管理同为管理员权限的普通桌面窗口；SYSTEM、受保护进程等更高权限表面仍不会强行操作。
+发布包中的 `NeatWin.exe` 是唯一主程序，使用 **WPF + .NET 10**，内置习惯记录器。旧 WinForms 界面和独立 Recorder 启动程序已删除，不保留兼容前端。Windows x64 发布包采用 framework-dependent 单文件方式，运行前安装 **Microsoft .NET 10 Desktop Runtime x64**。启动时仍按原权限模型请求管理员确认，以管理同为管理员权限的普通窗口。
 
-主窗口标题含“人因任务排布 v3”；内置记录器继续使用兼容 v2 的记录格式。使用 Smart 并主动点击整理即可，无需开启随手辅助，也无需刻意训练。
+新界面提供浅色/深色主题，以及窗口整理、快捷键、记录器三个固定入口；内置记录器继续使用兼容 v2 的记录格式。使用 Smart 并主动点击整理即可，无需开启随手辅助，也无需刻意训练。
 
 托盘新增“人因排布偏好”：允许或关闭有收益的缩放、小幅外侧出屏；调整参考信息尺度；可选输入当前工作区物理宽度与观看距离。不需要每次选择工作模式。未提供物理参数时不会猜测人眼视场角。
 
@@ -51,7 +51,7 @@ Classic 与小范围随手辅助保留。Smart 旧的强制几何填充不再覆
 
 ## 记录器与隐私
 
-记录器现在直接集成在主程序的新“记录器”页签中：NeatWin 运行时自动记录，可在页签里暂停／继续、打开数据目录、导出 ZIP 或清空记录。独立的 `NeatWin.Recorder.exe` 仍保留兼容用途；同一时间只允许一套记录引擎写入，避免主程序和独立记录器重复采集。升级时先退出旧主程序和独立记录器，再启动新主程序；正常使用无需另外启动 Recorder。
+记录器现在直接集成在主程序的新“记录器”页签中：NeatWin 运行时自动记录，可在页签里暂停／继续、打开数据目录、导出 ZIP 或清空记录。记录器只随主程序运行，不再分发独立的兼容启动程序。升级前退出正在运行的旧实例。
 
 本地目录：`%LOCALAPPDATA%\NeatWin\Recorder`。
 
@@ -72,12 +72,16 @@ Windows 10 2004 或更新版本／Windows 11。运行正式版需要 **Microsoft
 
 ```powershell
 dotnet test tests/NeatWin.Tests/NeatWin.Tests.csproj -c Release
-dotnet build src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release
 
 dotnet publish src/NeatWin/NeatWin.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/win-x64
-dotnet publish src/NeatWin.Recorder/NeatWin.Recorder.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/win-x64
 ```
 
-CI 执行测试、主程序／记录器构建与发布、启动检查，保存 TRX、源码快照和程序包。Desktop smoke 单独检查原生移动生命周期、普通层级调整和恢复。以相应提交的实际结果为准，不把测试存在当成已经通过。
+CI 执行测试、WPF 主程序构建与发布、启动检查，保存 TRX、源码快照和程序包。Desktop smoke 单独检查原生移动生命周期、普通层级调整和恢复。以相应提交的实际结果为准，不把测试存在当成已经通过。
 
 `tools/NeatWin.Replay` 直接使用生产 Core 做离线几何回放。旧日志只能构造假设场景，不是现场重建或真人满意率。任务可用性、补调负担和重要信息误遮挡仍需实际桌面验收。
+
+## WPF 视觉与工程边界
+
+界面使用统一的圆角卡片、文字层级、主题色与键盘焦点。顶部保留四档自动整理的直接选择；Smart/Classic、撤销、排布偏好、快捷键与记录器操作均保留。关闭主窗口隐藏到原生系统托盘，“退出”结束程序。托盘、快捷键和窗口通知使用 Win32/WPF 消息宿主，不引用 Windows Forms。原有视频黑边检测继续通过独立的 System.Drawing.Common 屏幕采样实现，不改变排布算法。
+
+`NeatWin.exe --ui-smoke <目录>` 仅创建实际 WPF 页面并输出浅色/深色截图；不安装窗口整理监听、不操作外部窗口。桌面 smoke 另外创建自己的测试窗口，验证事件、层级与记录器行为。截图和构建成功不能代替真实工作区长期验收。

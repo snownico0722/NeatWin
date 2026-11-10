@@ -3,13 +3,13 @@ using NeatWin.Windows;
 namespace NeatWin.App;
 
 internal readonly record struct HotkeyBinding(
-    Keys Key,
+    int Key,
     bool Control,
     bool Alt,
     bool Shift,
     bool Win)
 {
-    internal static HotkeyBinding Default => new(Keys.T, Control: false, Alt: true, Shift: false, Win: true);
+    internal static HotkeyBinding Default => new(0x54, Control: false, Alt: true, Shift: false, Win: true);
 
     internal bool HasModifier => Control || Alt || Shift || Win;
 
@@ -69,13 +69,14 @@ internal readonly record struct HotkeyBinding(
         return string.Join(" + ", parts);
     }
 
-    private static string FormatKey(Keys key)
-    {
-        if (key >= Keys.D0 && key <= Keys.D9)
-        {
-            return ((char)('0' + ((int)key - (int)Keys.D0))).ToString();
-        }
+    internal static bool IsValidKey(int key) => key is >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A
+        or >= 0x70 and <= 0x87 or 0x20 or 0x2D or 0x2E or 0x24 or 0x23 or 0x21 or 0x22;
 
-        return key.ToString();
-    }
+    internal static string FormatKey(int key) => key switch
+    {
+        >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A => ((char)key).ToString(),
+        >= 0x70 and <= 0x87 => "F" + (key - 0x6F),
+        0x20 => "Space", 0x2D => "Insert", 0x2E => "Delete", 0x24 => "Home", 0x23 => "End",
+        0x21 => "PageUp", 0x22 => "PageDown", _ => "0x" + key.ToString("X2"),
+    };
 }

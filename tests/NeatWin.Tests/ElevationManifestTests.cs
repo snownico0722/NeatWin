@@ -4,7 +4,6 @@ public sealed class ElevationManifestTests
 {
     [Theory]
     [InlineData("src/NeatWin/app.manifest")]
-    [InlineData("src/NeatWin.Recorder/app.manifest")]
     public void ExecutablesRequestAdministratorIntegrity(string relativePath)
     {
         var root = FindRepositoryRoot();
@@ -15,7 +14,6 @@ public sealed class ElevationManifestTests
 
     [Theory]
     [InlineData("src/NeatWin/NeatWin.csproj")]
-    [InlineData("src/NeatWin.Recorder/NeatWin.Recorder.csproj")]
     public void ProjectsEmbedTheElevationManifest(string relativePath)
     {
         var root = FindRepositoryRoot();
