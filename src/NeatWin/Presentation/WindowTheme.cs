@@ -23,6 +23,10 @@ internal sealed class WindowTheme
     {
         _window = window;
         _warm = warm;
+        window.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri($"/{typeof(WindowTheme).Assembly.GetName().Name};component/Presentation/ScrollBars.xaml", UriKind.Relative),
+        });
         window.FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
         window.FontSize = 13;
         window.UseLayoutRounding = true;
